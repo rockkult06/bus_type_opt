@@ -1,0 +1,346 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    /* Modern colors */
+    --modern-gray: 220 10% 95%;
+    --modern-gray-dark: 220 10% 20%;
+    --cloud-white: 0 0% 100%;
+    --cloud-white-dark: 220 10% 25%;
+
+    /* Primary color */
+    --primary: 210 100% 50%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 100% 50%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 210 100% 50%;
+    --radius: 0.5rem;
+
+    /* Bus colors - 10 distinct colors for buses */
+    --bus-1: 210 100% 50%; /* Blue */
+    --bus-2: 270 100% 60%; /* Purple */
+    --bus-3: 25 100% 50%; /* Orange */
+    --bus-4: 200 100% 50%; /* Sky Blue */
+    --bus-5: 330 100% 60%; /* Pink */
+    --bus-6: 120 60% 50%; /* Green */
+    --bus-7: 50 100% 50%; /* Yellow */
+    --bus-8: 290 60% 60%; /* Purple */
+    --bus-9: 180 60% 50%; /* Teal */
+    --bus-10: 0 60% 50%; /* Red */
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Modern colors for dark mode */
+    --modern-gray: 220 10% 20%;
+    --modern-gray-dark: 220 10% 15%;
+    --cloud-white: 220 10% 25%;
+    --cloud-white-dark: 220 10% 20%;
+
+    --primary: 210 100% 50%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 210 100% 50%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 210 100% 50%;
+
+    /* Bus colors for dark mode */
+    --bus-1: 210 100% 60%;
+    --bus-2: 270 100% 70%;
+    --bus-3: 25 100% 60%;
+    --bus-4: 200 100% 60%;
+    --bus-5: 330 100% 70%;
+    --bus-6: 120 60% 60%;
+    --bus-7: 50 100% 60%;
+    --bus-8: 290 60% 70%;
+    --bus-9: 180 60% 60%;
+    --bus-10: 0 60% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fadeIn {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+
+  /* Modern frosted glass effect */
+  .frosted-glass {
+    @apply bg-white/80 dark:bg-gray-900/80 backdrop-blur-md;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .frosted-glass-light {
+    @apply bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .modern-shadow {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  }
+
+  .dark .modern-shadow {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  }
+
+  .modern-button {
+    @apply bg-blue-500 hover:bg-blue-600 text-white transition-all duration-200;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  }
+
+  .modern-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .modern-button:active {
+    transform: translateY(1px);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .modern-input {
+    @apply bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md;
+    transition: all 0.2s ease;
+  }
+
+  .modern-input:focus {
+    @apply border-blue-500 dark:border-blue-400 ring-1 ring-blue-500 dark:ring-blue-400;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  .pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* Bus color classes */
+  .bus-color-1 {
+    background-color: hsl(var(--bus-1));
+    color: white;
+    font-weight: 600;
+  }
+  .bus-color-2 {
+    background-color: hsl(var(--bus-2));
+    color: white;
+    font-weight: 600;
+  }
+  .bus-color-3 {
+    background-color: hsl(var(--bus-3));
+    color: white;
+    font-weight: 600;
+  }
+  .bus-color-4 {
+    background-color: hsl(var(--bus-4));
+    color: white;
+    font-weight: 600;
+  }
+  .bus-color-5 {
+    background-color: hsl(var(--bus-5));
+    color: white;
+    font-weight: 600;
+  }
+  .bus-color-6 {
+    background-color: hsl(var(--bus-6));
+    color: white;
+    font-weight: 600;
+  }
+
+  .bus-color-7 {
+    background-color: hsl(var(--bus-7));
+    color: black;
+    font-weight: 600;
+  }
+  .bus-color-8 {
+    background-color: hsl(var(--bus-8));
+    color: white;
+    font-weight: 600;
+  }
+  .bus-color-9 {
+    background-color: hsl(var(--bus-9));
+    color: white;
+    font-weight: 600;
+  }
+  .bus-color-10 {
+    background-color: hsl(var(--bus-10));
+    color: white;
+    font-weight: 600;
+  }
+
+  /* Table row hover effect */
+  .table-row-hover:hover {
+    background-color: rgba(59, 130, 246, 0.05) !important;
+  }
+
+  /* Divider line */
+  .divider {
+    height: 1px;
+    background: linear-gradient(to right, transparent, hsl(var(--border)), transparent);
+    margin: 1.5rem 0;
+  }
+
+  /* Theme transition */
+  .theme-transition {
+    transition: background-color 0.5s ease, color 0.5s ease, border-color 0.5s ease;
+  }
+
+  /* Tab styling */
+  .custom-tabs {
+    background-color: hsl(var(--modern-gray));
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+
+  .custom-tab {
+    font-weight: 500;
+    transition: all 0.2s ease;
+  }
+
+  .custom-tab[data-state="active"] {
+    background-color: hsl(var(--cloud-white));
+    color: hsl(var(--primary));
+  }
+
+  .dark .custom-tab[data-state="active"] {
+    background-color: hsl(var(--cloud-white));
+    color: hsl(var(--primary));
+  }
+
+  /* Bus icon styling */
+  .bus-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+    background-color: hsl(var(--primary));
+    color: white;
+    font-size: 0.75rem;
+    font-weight: bold;
+  }
+
+  /* Glitch effect */
+  .glitch-effect {
+    position: relative;
+    animation: glitch 0.5s linear;
+  }
+
+  @keyframes glitch {
+    0% {
+      transform: translate(0);
+    }
+    20% {
+      transform: translate(-5px, 5px);
+    }
+    40% {
+      transform: translate(-5px, -5px);
+    }
+    60% {
+      transform: translate(5px, 5px);
+    }
+    80% {
+      transform: translate(5px, -5px);
+    }
+    100% {
+      transform: translate(0);
+    }
+  }
+
+  /* Tunnel animation */
+  .tunnel-animation {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle at center, transparent 0%, #000 70%);
+    animation: tunnel 1.5s forwards;
+    z-index: 100;
+  }
+
+  @keyframes tunnel {
+    0% {
+      transform: scale(0.1);
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      transform: scale(10);
+      opacity: 1;
+    }
+  }
+}
