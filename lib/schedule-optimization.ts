@@ -102,7 +102,7 @@ function createBusPool(optimizationResults: OptimizationResult[]): Bus[] {
   for (let i = 0; i < totalSolo; i++) {
     busPool.push({
       id: `SOLO_${i}`,
-      type: "solo",
+        type: "solo",
       isAvailable: true,
       availableFromTime: 0,
       currentLocation: "Depot",

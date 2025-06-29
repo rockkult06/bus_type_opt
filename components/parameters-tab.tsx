@@ -35,7 +35,6 @@ export default function ParametersTab() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [startButtonHover, setStartButtonHover] = useState(false)
 
-  // CSV dosyası yükleme fonksiyonunu güncelle
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -57,62 +56,112 @@ export default function ParametersTab() {
         const separator = headerLine.includes(";") ? ";" : ","
         const headers = headerLine.split(separator).map((h) => h.trim())
 
-        // Find indices for fixed columns
-        const routeNoIndex = headers.findIndex((h) => h.includes("Hat No"))
-        const routeNameIndex = headers.findIndex((h) => h.includes("Hat Adı"))
-        const lengthAtoBIndex = headers.findIndex((h) => h.includes("A→B Hat Uzunluğu"))
-        const lengthBtoAIndex = headers.findIndex((h) => h.includes("B→A Hat Uzunluğu"))
-        const timeAtoBIndex = headers.findIndex((h) => h.includes("A→B Parkur Süresi"))
-        const timeBtoAIndex = headers.findIndex((h) => h.includes("B→A Parkur Süresi"))
+        // --- NEW MORE ROBUST HEADER FINDING ---
+        const normalize = (str: string) => str.toLowerCase().replace(/\s+/g, "").replace("->", "→")
 
-        if ([routeNoIndex, routeNameIndex, lengthAtoBIndex, lengthBtoAIndex, timeAtoBIndex, timeBtoAIndex].includes(-1)) {
-          throw new Error("CSV başlıkları eksik veya hatalı. Gerekli sütunlar bulunamadı.")
+        const findHeaderIndex = (possibleNames: string[]): number => {
+          for (const name of possibleNames) {
+            const normalizedName = normalize(name)
+            const index = headers.findIndex((h) => normalize(h).includes(normalizedName))
+            if (index !== -1) return index
+          }
+          return -1
         }
 
-        const parsedRoutes: RouteData[] = lines.slice(1).map((line) => {
-          const values = line.split(separator).map((item) => item.trim())
-          const hourlyDemand: HourlyDemand[] = []
+        const routeNoIndex = findHeaderIndex(["Hat No"])
+        const routeNameIndex = findHeaderIndex(["Hat Adı", "Hat Adi"])
+        const lengthAtoBIndex = findHeaderIndex(["A→B Hat Uzunluğu", "A→B Uzunluk"])
+        const lengthBtoAIndex = findHeaderIndex(["B→A Hat Uzunluğu", "B→A Uzunluk"])
+        const timeAtoBIndex = findHeaderIndex(["A→B Parkur Süresi", "A→B Süre"])
+        const timeBtoAIndex = findHeaderIndex(["B→A Parkur Süresi", "B→A Süre"])
 
-          // Parse hourly demand columns
-          for (let hour = 4; hour < 28; hour++) {
-            const currentHour = hour % 24
-            const nextHour = (hour + 1) % 24
-            const timeSlotLabel = `${String(currentHour).padStart(2, "0")}:00-${String(nextHour).padStart(2, "0")}`
+        if ([routeNoIndex, routeNameIndex, lengthAtoBIndex, lengthBtoAIndex, timeAtoBIndex, timeBtoAIndex].includes(-1)) {
+          console.error({
+            routeNoIndex,
+            routeNameIndex,
+            lengthAtoBIndex,
+            lengthBtoAIndex,
+            timeAtoBIndex,
+            timeBtoAIndex,
+          })
+          throw new Error("CSV başlıkları eksik veya hatalı. Gerekli temel sütunlar (Hat No, Adı, Uzunluk, Süre) bulunamadı.")
+        }
 
-            const headerAtoB = headers.find((h) => h.includes(timeSlotLabel) && h.includes("A→B Yolcu"))
-            const headerBtoA = headers.find((h) => h.includes(timeSlotLabel) && h.includes("B→A Yolcu"))
+        // --- NEW HOURLY DEMAND PARSING ---
+        const demandColumnRegex = /(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*(A(→|->)B|B(→|->)A)/i
 
-            if (headerAtoB && headerBtoA) {
-              const indexAtoB = headers.indexOf(headerAtoB)
-              const indexBtoA = headers.indexOf(headerBtoA)
-              const passengersAtoB = Number.parseInt(values[indexAtoB] || "0")
-              const passengersBtoA = Number.parseInt(values[indexBtoA] || "0")
+        const demandColumns = (
+          headers
+            .map((header, index) => {
+              const match = header.match(demandColumnRegex)
+              if (match) {
+                const startHour = parseInt(match[1].split(":")[0], 10)
+                const direction = match[3].toLowerCase().includes("a") ? "AtoB" : "BtoA"
+                return { index, startHour, direction }
+              }
+              return null
+            })
+            .filter(Boolean) as { index: number; startHour: number; direction: "AtoB" | "BtoA" }[]
+        )
 
-              hourlyDemand.push({
-                hour: currentHour,
-                passengersAtoB: isNaN(passengersAtoB) ? 0 : passengersAtoB,
-                passengersBtoA: isNaN(passengersBtoA) ? 0 : passengersBtoA,
-              })
-            }
-          }
+        if (demandColumns.length === 0) {
+          throw new Error("CSV dosyasında saatlik yolcu verisi bulunamadı. Başlık formatını kontrol edin (örn: '04:00-05:00 A→B Yolcu').")
+        }
 
-          const route: RouteData = {
-            routeNo: values[routeNoIndex],
-            routeName: values[routeNameIndex],
-            routeLengthAtoB: Number.parseFloat(values[lengthAtoBIndex] || "0"),
-            routeLengthBtoA: Number.parseFloat(values[lengthBtoAIndex] || "0"),
-            travelTimeAtoB: Number.parseInt(values[timeAtoBIndex] || "0"),
-            travelTimeBtoA: Number.parseInt(values[timeBtoAIndex] || "0"),
-            hourlyDemand: hourlyDemand,
-          }
+        const parsedRoutes: RouteData[] = (
+          lines
+            .slice(1)
+            .map((line) => {
+              if (!line.trim()) return null // Skip empty lines
 
-          if (!route.routeNo || !route.routeName) {
-            throw new Error(`Bir veya daha fazla satırda Hat No veya Hat Adı eksik: ${line}`)
-          }
+              const values = line.split(separator).map((item) => item.trim())
+              const hourlyDemandMap = new Map<number, { passengersAtoB?: number; passengersBtoA?: number }>()
 
-          return route
-        })
+              for (const col of demandColumns) {
+                const hourData = hourlyDemandMap.get(col.startHour) || {}
+                const passengerCount = Number.parseInt(values[col.index] || "0")
 
+                if (col.direction === "AtoB") {
+                  hourData.passengersAtoB = isNaN(passengerCount) ? 0 : passengerCount
+                } else {
+                  hourData.passengersBtoA = isNaN(passengerCount) ? 0 : passengerCount
+                }
+                hourlyDemandMap.set(col.startHour, hourData)
+              }
+
+              const hourlyDemand: HourlyDemand[] = []
+              for (const [hour, data] of hourlyDemandMap.entries()) {
+                hourlyDemand.push({
+                  hour: hour,
+                  passengersAtoB: data.passengersAtoB ?? 0,
+                  passengersBtoA: data.passengersBtoA ?? 0,
+                })
+              }
+              hourlyDemand.sort((a, b) => a.hour - b.hour) // ensure sorted by hour
+
+              const route: RouteData = {
+                routeNo: values[routeNoIndex],
+                routeName: values[routeNameIndex],
+                routeLengthAtoB: Number.parseFloat(values[lengthAtoBIndex]?.replace(",", ".") || "0"),
+                routeLengthBtoA: Number.parseFloat(values[lengthBtoAIndex]?.replace(",", ".") || "0"),
+                travelTimeAtoB: Number.parseInt(values[timeAtoBIndex] || "0"),
+                travelTimeBtoA: Number.parseInt(values[timeBtoAIndex] || "0"),
+                hourlyDemand: hourlyDemand,
+              }
+
+              if (!route.routeNo || !route.routeName) {
+                return null
+              }
+
+              return route
+            })
+            .filter(Boolean) as RouteData[]
+        )
+
+        if (parsedRoutes.length === 0) {
+          throw new Error("CSV dosyasından geçerli hat verisi okunamadı.")
+        }
+        
         // Simulate a delay for the progress bar
         setTimeout(() => {
           setRoutes(parsedRoutes)
