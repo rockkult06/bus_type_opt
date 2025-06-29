@@ -144,10 +144,13 @@ export default function ParametersTab() {
 
     setParameters((prevParams: BusParameters) => {
       const newParams = { ...prevParams }
-      if (busType === 'driver' || busType === 'operation') {
+      if (busType === 'driver') {
+        newParams.driver.costPerHour = numValue
+      } else if (busType === 'operation') {
         // @ts-ignore
-        newParams[busType][field] = numValue
-      } else {
+        newParams[field] = numValue
+      }
+      else {
         // @ts-ignore
         newParams[busType][field] = numValue
       }
@@ -707,18 +710,16 @@ export default function ParametersTab() {
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-sm p-3">
-                      <p className="text-sm">CSV dosyası şu sütunları içermelidir:</p>
-                      <ul className="list-disc pl-5 mt-1 space-y-0.5 text-sm">
-                        <li>Hat No</li>
-                        <li>Hat Adı</li>
-                        <li>A→B Hat Uzunluğu (km)</li>
-                        <li>B→A Hat Uzunluğu (km)</li>
-                        <li>A→B Parkur Süresi (dk)</li>
-                        <li>B→A Parkur Süresi (dk)</li>
-                        <li>A→B Yolcu Sayısı</li>
-                        <li>B→A Yolcu Sayısı</li>
+                      <p className="text-sm font-semibold">Örnek CSV Başlıkları:</p>
+                      <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+                        <li>Hat No, Hat Adı</li>
+                        <li>A→B Hat Uzunluğu (km), B→A Hat Uzunluğu (km)</li>
+                        <li>A→B Parkur Süresi (dk), B→A Parkur Süresi (dk)</li>
+                        <li>04:00–05:00 A→B Yolcu Sayısı</li>
+                        <li>04:00–05:00 B→A Yolcu Sayısı</li>
+                        <li>... (ve diğer tüm 24 saat dilimleri)</li>
                       </ul>
-                      <p className="mt-1 text-sm">Dosya UTF-8 formatında olmalıdır.</p>
+                      <p className="mt-2 text-sm">Dosya UTF-8 formatında olmalıdır.</p>
                     </TooltipContent>
                   </Tooltip>
 
@@ -739,8 +740,7 @@ export default function ParametersTab() {
 
                   <div className="w-full mt-1">
                     <p className="text-xs text-muted-foreground">
-                      Hat No, Hat Adı, A→B/B→A Hat Uzunluğu (km), A→B/B→A Parkur Süresi (dk), A→B/B→A Yolcu Sayısı
-                      bilgilerini içeren CSV dosyası yükleyin.
+                      Lütfen <span className="font-semibold">24 saatlik</span> yolcu talebi ve hat detaylarını içeren CSV dosyasını seçin.
                     </p>
                     {isUploading && (
                       <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 animate-pulse">
