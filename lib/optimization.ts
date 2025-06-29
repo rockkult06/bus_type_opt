@@ -1,248 +1,162 @@
-import type { RouteData, BusParameters, OptimizationResult, KPIData } from "@/context/bus-optimization-context"
+import type { RouteData, BusParameters, OptimizationResult, KPIData, HourlyDemand } from "@/context/bus-optimization-context"
 
 // Main optimization function
 export function runOptimization(
   routes: RouteData[],
   parameters: BusParameters,
 ): { results: OptimizationResult[]; kpis: KPIData; isFeasible: boolean } {
-  // Initialize results array
   const results: OptimizationResult[] = []
   let isFeasible = true
 
-  // Track total fleet usage
-  let totalMinibusUsed = 0
-  let totalSoloUsed = 0
-  let totalArticulatedUsed = 0
+  // Track total fleet needs across all routes
+  let totalMinibusNeeded = 0
+  let totalSoloNeeded = 0
+  let totalArticulatedNeeded = 0
 
-  // Optimize each route
+  // Optimize each route to find the required fleet for its own peak
   for (const route of routes) {
-    const result = optimizeRoute(route, parameters)
-
-    // Update total fleet usage
-    totalMinibusUsed += result.minibus
-    totalSoloUsed += result.solo
-    totalArticulatedUsed += result.articulated
-
+    const result = optimizeRouteForPeakDemand(route, parameters)
     results.push(result)
+    totalMinibusNeeded += result.minibus
+    totalSoloNeeded += result.solo
+    totalArticulatedNeeded += result.articulated
   }
 
-  // Check if we have enough buses in the fleet
+  // Check if the company's total fleet is sufficient
   if (
-    totalMinibusUsed > parameters.minibus.fleetCount ||
-    totalSoloUsed > parameters.solo.fleetCount ||
-    totalArticulatedUsed > parameters.articulated.fleetCount
+    totalMinibusNeeded > parameters.minibus.fleetCount ||
+    totalSoloNeeded > parameters.solo.fleetCount ||
+    totalArticulatedNeeded > parameters.articulated.fleetCount
   ) {
     isFeasible = false
   }
 
-  // Calculate KPIs
-  const kpis = calculateKPIs(results, routes, parameters)
+  // Note: KPIs at this stage are just estimations based on peak demand.
+  // The real, detailed KPIs will be calculated after the 24h schedule simulation.
+  const estimatedKpis = calculateEstimatedKPIs(results, routes, parameters)
 
-  return { results, kpis, isFeasible }
+  return { results, kpis: estimatedKpis, isFeasible }
 }
 
-// OptimizationResult tipini güncelle - routeLength alanını kaldır ve her iki yön için ayrı uzunluk ekle
-function optimizeRoute(route: RouteData, parameters: BusParameters): OptimizationResult {
-  const { routeNo, routeName, routeLengthAtoB, routeLengthBtoA, peakPassengersAtoB, peakPassengersBtoA } = route
+// New function to find the peak demand within a 24-hour period for a single route
+function findPeakDemand(hourlyDemand: HourlyDemand[]): {
+  peakPassengersAtoB: number
+  peakPassengersBtoA: number
+  peakHourData: HourlyDemand
+} {
+  let peakPassengersAtoB = 0
+  let peakPassengersBtoA = 0
+  let peakCombined = 0
+  let peakHourData: HourlyDemand = { hour: -1, passengersAtoB: 0, passengersBtoA: 0 }
 
-  // Ortalama hat uzunluğunu hesapla
-  const avgRouteLength = (routeLengthAtoB + routeLengthBtoA) / 2
+  for (const demand of hourlyDemand) {
+    if (demand.passengersAtoB > peakPassengersAtoB) {
+      peakPassengersAtoB = demand.passengersAtoB
+    }
+    if (demand.passengersBtoA > peakPassengersBtoA) {
+      peakPassengersBtoA = demand.passengersBtoA
+    }
+    // We might also care about the combined peak for bus assignment
+    if (demand.passengersAtoB + demand.passengersBtoA > peakCombined) {
+      peakCombined = demand.passengersAtoB + demand.passengersBtoA
+      peakHourData = demand
+    }
+  }
 
-  // Her iki yöndeki toplam yolcu sayısını hesapla
-  const totalPassengers = peakPassengersAtoB + peakPassengersBtoA
+  // The optimization needs to satisfy the highest demand in either direction at any time.
+  // We use the highest unidirectional peak for capacity calculation.
+  return {
+    peakPassengersAtoB: Math.max(...hourlyDemand.map((d) => d.passengersAtoB)),
+    peakPassengersBtoA: Math.max(...hourlyDemand.map((d) => d.passengersBtoA)),
+    peakHourData,
+  }
+}
 
-  // Her yön için ayrı ayrı minimum otobüs sayılarını hesapla
-  const minMinibusesAtoB = Math.ceil(peakPassengersAtoB / parameters.minibus.capacity)
-  const minSoloBusesAtoB = Math.ceil(peakPassengersAtoB / parameters.solo.capacity)
-  const minArticulatedBusesAtoB = Math.ceil(peakPassengersAtoB / parameters.articulated.capacity)
+function optimizeRouteForPeakDemand(route: RouteData, parameters: BusParameters): OptimizationResult {
+  const { routeNo, routeName, routeLengthAtoB, routeLengthBtoA, hourlyDemand } = route
 
-  const minMinibusesBtoA = Math.ceil(peakPassengersBtoA / parameters.minibus.capacity)
-  const minSoloBusesBtoA = Math.ceil(peakPassengersBtoA / parameters.solo.capacity)
-  const minArticulatedBusesBtoA = Math.ceil(peakPassengersBtoA / parameters.articulated.capacity)
+  // Step 1: Find the absolute peak demand for this route from the hourly data
+  const { peakPassengersAtoB, peakPassengersBtoA, peakHourData } = findPeakDemand(hourlyDemand)
 
-  // Her iki yön için toplam minimum otobüs sayılarını hesapla
-  const minMinibuses = Math.max(minMinibusesAtoB, minMinibusesBtoA)
-  const minSoloBuses = Math.max(minSoloBusesAtoB, minSoloBusesBtoA)
-  const minArticulatedBuses = Math.max(minArticulatedBusesAtoB, minArticulatedBusesBtoA)
+  // The rest of the logic is similar to the old `optimizeRoute`, but uses the found peak demand.
+  // The goal is to find the minimal fleet composition for THIS route that can handle its busiest hour.
 
-  // Calculate costs for different bus types
-  const minibusOperatingCost =
-    parameters.minibus.fuelCost + parameters.minibus.maintenanceCost + parameters.minibus.depreciationCost
-  const soloOperatingCost =
-    parameters.solo.fuelCost + parameters.solo.maintenanceCost + parameters.solo.depreciationCost
-  const articulatedOperatingCost =
-    parameters.articulated.fuelCost + parameters.articulated.maintenanceCost + parameters.articulated.depreciationCost
+  // Minimum number of buses of each type to meet the highest demand in either direction
+  const minMinibuses = Math.ceil(Math.max(peakPassengersAtoB, peakPassengersBtoA) / parameters.minibus.capacity)
+  const minSoloBuses = Math.ceil(Math.max(peakPassengersAtoB, peakPassengersBtoA) / parameters.solo.capacity)
+  const minArticulatedBuses = Math.ceil(
+    Math.max(peakPassengersAtoB, peakPassengersBtoA) / parameters.articulated.capacity,
+  )
 
   // Initialize variables to track the best solution
   let bestCost = Number.POSITIVE_INFINITY
   let bestMinibus = 0
   let bestSolo = 0
   let bestArticulated = 0
-  let bestCapacityUtilization = 0
 
-  // Try different combinations of bus types
+  // Brute-force try different combinations of bus types
+  // We iterate up to the minimum required number for each type, as using more of one type
+  // just to reduce another is the core of the optimization.
   for (let m = 0; m <= minMinibuses; m++) {
     for (let s = 0; s <= minSoloBuses; s++) {
       for (let a = 0; a <= minArticulatedBuses; a++) {
-        // Calculate total capacity
         const totalCapacity =
           m * parameters.minibus.capacity + s * parameters.solo.capacity + a * parameters.articulated.capacity
 
-        // Her iki yön için kapasite kontrolü yap
+        // Ensure capacity is met for both directions during the peak hour
         if (totalCapacity < peakPassengersAtoB || totalCapacity < peakPassengersBtoA) continue
 
-        // Calculate capacity utilization (her iki yönün ortalaması)
-        const capacityUtilizationAtoB = peakPassengersAtoB / totalCapacity
-        const capacityUtilizationBtoA = peakPassengersBtoA / totalCapacity
-        const capacityUtilization = (capacityUtilizationAtoB + capacityUtilizationBtoA) / 2
+        // Cost calculation is an estimation for a single "peak hour" trip for comparison.
+        const tripCost =
+          (m * (parameters.minibus.fuelCost + parameters.minibus.maintenanceCost) +
+            s * (parameters.solo.fuelCost + parameters.solo.maintenanceCost) +
+            a * (parameters.articulated.fuelCost + parameters.articulated.maintenanceCost)) *
+            (routeLengthAtoB + routeLengthBtoA) +
+          (m + s + a) * parameters.driverCost * (routeLengthAtoB + routeLengthBtoA)
 
-        // Calculate total cost - her iki yöndeki hat uzunluklarını kullan
-        const totalFuelCost =
-          m * parameters.minibus.fuelCost * routeLengthAtoB +
-          s * parameters.solo.fuelCost * routeLengthAtoB +
-          a * parameters.articulated.fuelCost * routeLengthAtoB +
-          m * parameters.minibus.fuelCost * routeLengthBtoA +
-          s * parameters.solo.fuelCost * routeLengthBtoA +
-          a * parameters.articulated.fuelCost * routeLengthBtoA
-
-        const totalMaintenanceCost =
-          m * parameters.minibus.maintenanceCost * routeLengthAtoB +
-          s * parameters.solo.maintenanceCost * routeLengthAtoB +
-          a * parameters.articulated.maintenanceCost * routeLengthAtoB +
-          m * parameters.minibus.maintenanceCost * routeLengthBtoA +
-          s * parameters.solo.maintenanceCost * routeLengthBtoA +
-          a * parameters.articulated.maintenanceCost * routeLengthBtoA
-
-        const totalDepreciationCost =
-          m * parameters.minibus.depreciationCost * routeLengthAtoB +
-          s * parameters.solo.depreciationCost * routeLengthAtoB +
-          a * parameters.articulated.depreciationCost * routeLengthAtoB +
-          m * parameters.minibus.depreciationCost * routeLengthBtoA +
-          s * parameters.solo.depreciationCost * routeLengthBtoA +
-          a * parameters.articulated.depreciationCost * routeLengthBtoA
-
-        const totalDriverCost = (m + s + a) * parameters.driverCost * (routeLengthAtoB + routeLengthBtoA)
-
-        const totalCost = totalFuelCost + totalMaintenanceCost + totalDepreciationCost + totalDriverCost
-
-        // Calculate carbon emission - her iki yöndeki hat uzunluklarını kullan
-        const totalCarbonEmission =
-          m * parameters.minibus.carbonEmission * routeLengthAtoB +
-          s * parameters.solo.carbonEmission * routeLengthAtoB +
-          a * parameters.articulated.carbonEmission * routeLengthAtoB +
-          m * parameters.minibus.carbonEmission * routeLengthBtoA +
-          s * parameters.solo.carbonEmission * routeLengthBtoA +
-          a * parameters.articulated.carbonEmission * routeLengthBtoA
-
-        // Update best solution if this is better
-        if (totalCost < bestCost) {
-          bestCost = totalCost
+        if (tripCost < bestCost) {
+          bestCost = tripCost
           bestMinibus = m
           bestSolo = s
           bestArticulated = a
-          bestCapacityUtilization = capacityUtilization
         }
       }
     }
   }
 
-  // Calculate detailed costs for the best solution - her iki yöndeki hat uzunluklarını kullan
-  const fuelCost =
-    bestMinibus * parameters.minibus.fuelCost * (routeLengthAtoB + routeLengthBtoA) +
-    bestSolo * parameters.solo.fuelCost * (routeLengthAtoB + routeLengthBtoA) +
-    bestArticulated * parameters.articulated.fuelCost * (routeLengthAtoB + routeLengthBtoA)
-
-  const maintenanceCost =
-    bestMinibus * parameters.minibus.maintenanceCost * (routeLengthAtoB + routeLengthBtoA) +
-    bestSolo * parameters.solo.maintenanceCost * (routeLengthAtoB + routeLengthBtoA) +
-    bestArticulated * parameters.articulated.maintenanceCost * (routeLengthAtoB + routeLengthBtoA)
-
-  const depreciationCost =
-    bestMinibus * parameters.minibus.depreciationCost * (routeLengthAtoB + routeLengthBtoA) +
-    bestSolo * parameters.solo.depreciationCost * (routeLengthAtoB + routeLengthBtoA) +
-    bestArticulated * parameters.articulated.depreciationCost * (routeLengthAtoB + routeLengthBtoA)
-
-  const driverCost =
-    (bestMinibus + bestSolo + bestArticulated) * parameters.driverCost * (routeLengthAtoB + routeLengthBtoA)
-
-  const carbonEmission =
-    bestMinibus * parameters.minibus.carbonEmission * (routeLengthAtoB + routeLengthBtoA) +
-    bestSolo * parameters.solo.carbonEmission * (routeLengthAtoB + routeLengthBtoA) +
-    bestArticulated * parameters.articulated.carbonEmission * (routeLengthAtoB + routeLengthBtoA)
-
-  // Return the optimization result
+  // Return the result for this route
   return {
     routeNo,
     routeName,
-    routeLength: avgRouteLength, // Ortalama hat uzunluğunu kullan
     minibus: bestMinibus,
     solo: bestSolo,
     articulated: bestArticulated,
-    fuelCost,
-    maintenanceCost,
-    depreciationCost,
-    driverCost,
-    totalCost: fuelCost + maintenanceCost + depreciationCost + driverCost,
-    carbonEmission,
-    capacityUtilization: bestCapacityUtilization,
-    peakPassengersAtoB,
-    peakPassengersBtoA,
+    totalCost: bestCost, // This is just the comparative cost, not the full day's cost
+    peakHourDemand: {
+      hour: peakHourData.hour,
+      passengersAtoB: peakPassengersAtoB,
+      passengersBtoA: peakPassengersBtoA,
+    },
   }
 }
 
-// calculateKPIs fonksiyonunu güncelle - NaN değerlerini önlemek için
-function calculateKPIs(results: OptimizationResult[], routes: RouteData[], parameters: BusParameters): KPIData {
-  // Calculate total passengers (her iki yön için)
-  const totalPassengers = routes.reduce((sum, route) => sum + route.peakPassengersAtoB + route.peakPassengersBtoA, 0)
-
-  // Calculate total distance - her iki yöndeki hat uzunluklarını kullan
-  let totalDistance = 0
-
-  results.forEach((result) => {
-    const route = routes.find((r) => r.routeNo === result.routeNo)
-    if (route) {
-      // Her iki yöndeki toplam mesafe
-      const routeDistance = route.routeLengthAtoB + route.routeLengthBtoA
-      // Her otobüs tipi için sefer sayısı
-      const totalTrips = result.minibus + result.solo + result.articulated
-      // Bu hat için toplam mesafe
-      totalDistance += routeDistance * totalTrips
-    }
-  })
-
-  // Calculate total costs
-  const totalFuelCost = results.reduce((sum, result) => sum + result.fuelCost, 0)
-  const totalMaintenanceCost = results.reduce((sum, result) => sum + result.maintenanceCost, 0)
-  const totalDepreciationCost = results.reduce((sum, result) => sum + result.depreciationCost, 0)
-  const totalDriverCost = results.reduce((sum, result) => sum + result.driverCost, 0)
-  const totalCost = totalFuelCost + totalMaintenanceCost + totalDepreciationCost + totalDriverCost
-
-  // Calculate cost per km and per passenger
-  const costPerKm = totalDistance > 0 ? totalCost / totalDistance : 0
-  const costPerPassenger = totalPassengers > 0 ? totalCost / totalPassengers : 0
-
-  // Calculate carbon emission metrics
-  const totalCarbonEmission = results.reduce((sum, result) => sum + result.carbonEmission, 0)
-  const carbonPerPassenger = totalPassengers > 0 ? totalCarbonEmission / totalPassengers : 0
-
-  // Estimate carbon saved by using public transport
-  // Assuming average car emission is 0.2 kg/km per passenger
-  const carEmissionPerPassenger = 0.2
-  const carbonSaved = totalPassengers * totalDistance * (carEmissionPerPassenger - carbonPerPassenger)
-
+// This function now provides a rough estimation. The real KPIs come from the schedule optimizer.
+function calculateEstimatedKPIs(results: OptimizationResult[], routes: RouteData[], parameters: BusParameters): KPIData {
+  // For now, return a simplified or zeroed KPI object, as the detailed calculation
+  // is now the responsibility of the schedule optimizer.
   return {
-    totalPassengers,
-    totalDistance,
-    optimizationTime: 0, // This will be set by the caller
-    totalFuelCost,
-    totalMaintenanceCost,
-    totalDepreciationCost,
-    totalDriverCost,
-    totalCost,
-    costPerKm,
-    costPerPassenger,
-    totalCarbonEmission,
-    carbonPerPassenger,
-    carbonSaved,
+    totalPassengers: 0,
+    totalDistance: 0,
+    optimizationTime: 0,
+    totalFuelCost: 0,
+    totalMaintenanceCost: 0,
+    totalDepreciationCost: 0,
+    totalDriverCost: 0,
+    totalCost: 0,
+    costPerKm: 0,
+    costPerPassenger: 0,
+    totalCarbonEmission: 0,
+    carbonPerPassenger: 0,
+    carbonSaved: 0,
   }
 }

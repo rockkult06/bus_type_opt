@@ -10,8 +10,13 @@ export type RouteData = {
   routeLengthBtoA: number // B'den A'ya hat uzunluğu
   travelTimeAtoB: number // A'dan B'ye parkur süresi (dakika)
   travelTimeBtoA: number // B'den A'ya parkur süresi (dakika)
-  peakPassengersAtoB: number // A'dan B'ye yolcu sayısı
-  peakPassengersBtoA: number // B'den A'ya yolcu sayısı
+  hourlyDemand: HourlyDemand[] // 24 saatlik yolcu verisi
+}
+
+export type HourlyDemand = {
+  hour: number // e.g., 4 for 04:00-05:00
+  passengersAtoB: number
+  passengersBtoA: number
 }
 
 // BusParameters tipine maxInterlining ekleyelim
@@ -45,69 +50,49 @@ export type BusParameters = {
 }
 
 // Schedule optimization types
-// ScheduleParameters tipini güncelle - artık parkur sürelerini içermeyecek
+// ScheduleParameters tipini güncelle - artık 24 saatlik operasyon için
 export type ScheduleParameters = {
-  timeRange: {
-    start: string
-    end: string
-  }
+  operationStartTime: string // e.g., "04:00"
+  operationEndTime: string // e.g., "04:00" (next day)
 }
 
-// ScheduleResult tipini güncelle - hat bazlı çizelgeleri ekle
+// ScheduleResult tipini tamamen yeniden yapılandırıyoruz
 export type ScheduleResult = {
-  frequencyAB: number
-  frequencyBA: number
-  tripsAB: number
-  tripsBA: number
-  totalBuses: number
-  scheduleAB: Array<{ time: string; busId: string; busType?: string; routeNo?: string }>
-  scheduleBA: Array<{ time: string; busId: string; busType?: string; routeNo?: string }>
-  busUtilization: Record<string, { trips: number; busType?: string }>
-  routeSchedules?: Record<
-    string,
-    {
-      scheduleAB: Array<{ time: string; busId: string; busType?: string }>
-      scheduleBA: Array<{ time: string; busId: string; busType?: string }>
-      routeInfo?: {
-        routeLengthAtoB: number
-        routeLengthBtoA: number
-        travelTimeAtoB: number
-        travelTimeBtoA: number
-        peakPassengersAtoB: number
-        peakPassengersBtoA: number
-      }
-    }
-  >
-  optimalInterlining?: number // Optimal interlining değerini ekledik
+  schedule: ScheduleEntry[] // Tüm 24 saatlik sefer planı
+  totalBusesUsed: {
+    minibus: number
+    solo: number
+    articulated: number
+  }
+  busUtilization: Record<string, { trips: number; busType: string; totalTimeOnDuty: number }> // busId -> utilization
+  kpis: KPIData // 24 saatlik operasyonun KPI'ları
+  optimalInterlining?: number
 }
 
-// OptimizationResult tipini güncelle
+// OptimizationResult tipini güncelle - artık zirve saat yolcu sayısı yok
 export type OptimizationResult = {
   routeNo: string
   routeName: string
-  routeLength: number
-  minibus: number
-  solo: number
-  articulated: number
-  fuelCost: number
-  maintenanceCost: number
-  depreciationCost: number
-  driverCost: number
-  totalCost: number
-  carbonEmission: number // Carbon emission for this route
-  capacityUtilization: number
-  peakPassengersAtoB: number // A'dan B'ye yolcu sayısı
-  peakPassengersBtoA: number // B'den A'ya yolcu sayısı
+  minibus: number // Required number of minibuses for this route's peak
+  solo: number // Required number of solo buses
+  articulated: number // Required number of articulated buses
+  totalCost: number // Estimated cost for this fleet on this route (can be simplified)
+  peakHourDemand: { // The peak demand found for this route
+    hour: number
+    passengersAtoB: number
+    passengersBtoA: number
+  }
 }
 
-// Schedule optimization types
+// ScheduleEntry tipini daha detaylı hale getiriyoruz
 export type ScheduleEntry = {
+  tripId: string // Unique ID for the trip
   routeNo: string
-  departureTime: string
-  arrivalTime: string
+  busId: string
   busType: "minibus" | "solo" | "articulated"
-  busNumber: string
   direction: "AtoB" | "BtoA"
+  departureTime: number // Minutes from start of operation (04:00)
+  arrivalTime: number // Minutes from start of operation
 }
 
 // Update the KPIData type to include carbon emission metrics
@@ -137,7 +122,7 @@ type BusOptimizationContextType = {
   scheduleParameters: ScheduleParameters
   setScheduleParameters: (scheduleParameters: ScheduleParameters) => void
   scheduleResults: ScheduleResult | null
-  setScheduleResults: (scheduleResults: ScheduleResult) => void
+  setScheduleResults: (scheduleResults: ScheduleResult | null) => void
   kpis: KPIData | null
   setKpis: (kpis: KPIData) => void
   isOptimizing: boolean
@@ -177,10 +162,8 @@ const defaultParameters: BusParameters = {
 }
 
 const defaultScheduleParameters: ScheduleParameters = {
-  timeRange: {
-    start: "07:00",
-    end: "08:00",
-  },
+  operationStartTime: "04:00",
+  operationEndTime: "28:00", // Represents 04:00 next day for easier calculation
 }
 
 const BusOptimizationContext = createContext<BusOptimizationContextType | undefined>(undefined)
