@@ -1,144 +1,138 @@
-import type {
-  OptimizationResult,
-  ScheduleParameters,
-  ScheduleResult,
-  BusParameters,
-  RouteData,
-  ScheduleEntry,
-  KPIData,
-} from "@/context/bus-optimization-context"
-import { timeToMinutes } from "./utils" // Assuming you have this helper
-
-// Main function to create the 24-hour dynamic schedule
-export function createSchedule(
-  optimizationResults: OptimizationResult[],
-  scheduleParams: ScheduleParameters,
-  routes: RouteData[],
-  parameters: BusParameters,
-): { scheduleResult: ScheduleResult; isFeasible: boolean } {
-  // --- Setup ---
-  // Create a pool of all available buses based on the optimization results
-  const busPool = createBusPool(optimizationResults)
-
-  // Initialize data structures for simulation
-  const schedule: ScheduleEntry[] = []
-  const simulationEndTime = timeToMinutes(scheduleParams.operationEndTime) - timeToMinutes(scheduleParams.operationStartTime)
-  const routeMap = new Map(routes.map((r) => [r.routeNo, r]))
-
-  // --- Simulation Loop ---
-  // Simulate minute by minute for 24 hours (1440 minutes)
-  for (let currentTime = 0; currentTime < simulationEndTime; currentTime++) {
-    // For each route, check if a new trip is needed at the current time
-    for (const route of routes) {
-      const hourlyDemand = route.hourlyDemand.find(
-        (d) => d.hour === Math.floor(currentTime / 60) + parseInt(scheduleParams.operationStartTime.split(":")[0]),
-      )
-
-      if (!hourlyDemand) continue
-
-      // Check for both directions
-      // This logic needs to be sophisticated. It should decide WHEN to dispatch a bus.
-      // A simple approach: dispatch buses at intervals to meet hourly demand.
-      const demandAtoB = hourlyDemand.passengersAtoB
-      const demandBtoA = hourlyDemand.passengersBtoA
-
-      // More complex logic would go here to determine if a bus should depart now.
-      // e.g., based on a target frequency for that hour.
-      // Let's assume for now we dispatch if a bus is available and there's demand.
-      // This part is highly complex and would require a proper heuristic.
-    }
-  }
-
-  // --- Post-simulation Calculation ---
-  // This is a placeholder for the complex simulation logic.
-  // A real implementation would be much more involved.
-  // For now, we will return a mock result.
-
-  const isFeasible = busPool.length > 0 // Placeholder feasibility
-  const finalKPIs = calculateFinalKPIs(schedule, routes, parameters)
-
-  const scheduleResult: ScheduleResult = {
-    schedule: schedule,
-    totalBusesUsed: {
-      minibus: busPool.filter((b) => b.type === "minibus").length,
-      solo: busPool.filter((b) => b.type === "solo").length,
-      articulated: busPool.filter((b) => b.type === "articulated").length,
-    },
-    busUtilization: {}, // To be calculated based on the final schedule
-    kpis: finalKPIs,
-    optimalInterlining: parameters.maxInterlining, // This would be determined by the simulation
-  }
-
-  return { scheduleResult, isFeasible }
-}
-
-// --- Helper Functions ---
+import type { StrategicResult, RouteData, BusParameters, ScheduleResult, Trip } from "@/types"
 
 type Bus = {
   id: string
   type: "minibus" | "solo" | "articulated"
-  isAvailable: boolean
-  availableFromTime: number // Simulation time when the bus becomes free
-  currentLocation: string // e.g., "Depot", "RouteA_EndB"
-  trips: ScheduleEntry[]
+  availableFrom: number // time in minutes
+  assignedRoute: string | null
 }
 
-function createBusPool(optimizationResults: OptimizationResult[]): Bus[] {
+export function runScheduleOptimization(
+  strategicResult: StrategicResult,
+  routes: RouteData[],
+  parameters: BusParameters,
+): ScheduleResult {
+  const { recommendedFleet } = strategicResult
+  const operationStartTime = parameters.operationStartTime
+
+  // 1. Create the pool of buses based on the strategic results
   const busPool: Bus[] = []
-  const totalMinibus = optimizationResults.reduce((sum, r) => sum + r.minibus, 0)
-  const totalSolo = optimizationResults.reduce((sum, r) => sum + r.solo, 0)
-  const totalArticulated = optimizationResults.reduce((sum, r) => sum + r.articulated, 0)
+  let busIdCounter = 0
+  Object.entries(recommendedFleet).forEach(([type, count]) => {
+    for (let i = 0; i < count; i++) {
+      busPool.push({
+        id: `${type.toUpperCase()}-${busIdCounter++}`,
+        type: type as "minibus" | "solo" | "articulated",
+        availableFrom: operationStartTime,
+        assignedRoute: null,
+      })
+    }
+  })
 
-  for (let i = 0; i < totalMinibus; i++) {
-    busPool.push({
-      id: `MINI_${i}`,
-      type: "minibus",
-      isAvailable: true,
-      availableFromTime: 0,
-      currentLocation: "Depot",
-      trips: [],
-    })
+  const schedule: Trip[] = []
+  const routeMap = new Map(routes.map(r => [r.routeNo, r]))
+
+  // 2. Simple scheduling heuristic
+  // This is a very basic greedy algorithm. A real-world solution would be more complex.
+  for (let hour = operationStartTime / 60; hour < 28; hour++) {
+    for (const route of routes) {
+      const demandData = route.hourlyDemand.find(d => d.hour === (hour % 24))
+      if (!demandData) continue
+
+      const capacityNeededAtoB = demandData.demandAtoB
+      const capacityNeededBtoA = demandData.demandBtoA
+      const travelTimeAtoB = route.travelTimeAtoB
+      const travelTimeBtoA = route.travelTimeBtoA
+
+      // Schedule trips for AtoB direction for this hour
+      let scheduledCapacityAtoB = 0
+      while (scheduledCapacityAtoB < capacityNeededAtoB) {
+        const bus = findAvailableBus(busPool, hour * 60, route.routeNo, parameters.maxInterlining)
+        if (!bus) break // No available buses
+
+        const busCapacity = parameters[bus.type].capacity
+        schedule.push({
+          tripId: `T_${schedule.length}`,
+          busId: bus.id,
+          busType: bus.type,
+          routeNo: route.routeNo,
+          direction: "AtoB",
+          startTime: hour * 60,
+          endTime: hour * 60 + travelTimeAtoB,
+        })
+        bus.availableFrom = hour * 60 + travelTimeAtoB + 10 // 10 min turnaround
+        bus.assignedRoute = route.routeNo
+        scheduledCapacityAtoB += busCapacity
+      }
+      
+      // Schedule trips for BtoA direction for this hour
+      let scheduledCapacityBtoA = 0
+      while (scheduledCapacityBtoA < capacityNeededBtoA) {
+          const bus = findAvailableBus(busPool, hour * 60, route.routeNo, parameters.maxInterlining)
+          if (!bus) break // No available buses
+
+          const busCapacity = parameters[bus.type].capacity
+          schedule.push({
+              tripId: `T_${schedule.length}`,
+              busId: bus.id,
+              busType: bus.type,
+              routeNo: route.routeNo,
+              direction: "BtoA",
+              startTime: hour * 60,
+              endTime: hour * 60 + travelTimeBtoA,
+          })
+          bus.availableFrom = hour * 60 + travelTimeBtoA + 10 // 10 min turnaround
+          bus.assignedRoute = route.routeNo
+          scheduledCapacityBtoA += busCapacity
+      }
+    }
   }
-  for (let i = 0; i < totalSolo; i++) {
-    busPool.push({
-      id: `SOLO_${i}`,
-        type: "solo",
-      isAvailable: true,
-      availableFromTime: 0,
-      currentLocation: "Depot",
-      trips: [],
-    })
-  }
-  for (let i = 0; i < totalArticulated; i++) {
-    busPool.push({
-      id: `ARTI_${i}`,
-      type: "articulated",
-      isAvailable: true,
-      availableFromTime: 0,
-      currentLocation: "Depot",
-      trips: [],
-    })
+  
+  // 3. Calculate final stats
+  const totalTrips = schedule.length
+  let totalDistance = 0
+  let totalDuration = 0
+  const busUtilization: ScheduleResult["stats"]["busUtilization"] = {}
+
+  for(const trip of schedule) {
+      const route = routeMap.get(trip.routeNo)
+      if(route) {
+          totalDistance += trip.direction === 'AtoB' ? route.routeLengthAtoB : route.routeLengthBtoA
+      }
+      totalDuration += trip.endTime - trip.startTime
+
+      if(!busUtilization[trip.busId]) {
+          busUtilization[trip.busId] = { trips: 0, busType: trip.busType, routes: [] }
+      }
+      busUtilization[trip.busId].trips++
+      if(!busUtilization[trip.busId].routes.includes(Number(trip.routeNo))) {
+        busUtilization[trip.busId].routes.push(Number(trip.routeNo))
+      }
   }
 
-  return busPool
-}
-
-function calculateFinalKPIs(schedule: ScheduleEntry[], routes: RouteData[], parameters: BusParameters): KPIData {
-  // This function would calculate detailed KPIs based on the full 24h schedule
-  // For now, returning a zeroed object.
   return {
-    totalPassengers: 0, // Should be sum of all hourly demands
-    totalDistance: 0, // Sum of all trip distances
-    optimizationTime: 0,
-    totalFuelCost: 0,
-    totalMaintenanceCost: 0,
-    totalDepreciationCost: 0,
-    totalDriverCost: 0,
-    totalCost: 0,
-    costPerKm: 0,
-    costPerPassenger: 0,
-    totalCarbonEmission: 0,
-    carbonPerPassenger: 0,
-    carbonSaved: 0,
+    schedule,
+    stats: {
+      totalTrips,
+      totalDistance,
+      totalDuration,
+      busUtilization,
+    },
   }
 }
+
+function findAvailableBus(busPool: Bus[], currentTime: number, routeNo: string, maxInterlining: number): Bus | null {
+  // Find the earliest available bus, preferring buses already on the same route
+  busPool.sort((a, b) => a.availableFrom - b.availableFrom)
+  
+  const idealBus = busPool.find(
+    bus => bus.availableFrom <= currentTime && bus.assignedRoute === routeNo
+  )
+  if(idealBus) return idealBus
+
+  // If no bus on the same route, find any available bus that can take a new route
+  const interlineBus = busPool.find(
+    bus => bus.availableFrom <= currentTime && (bus.assignedRoute === null || maxInterlining > 1) // Simplified interlining logic
+  )
+  return interlineBus || null
+} 

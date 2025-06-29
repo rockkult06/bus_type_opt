@@ -3,124 +3,108 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useBusOptimization } from "@/context/bus-optimization-context"
-import { runOptimization } from "@/lib/optimization"
+import { runStrategicOptimization } from "@/lib/optimization"
+import { runScheduleOptimization } from "@/lib/schedule-optimization"
 import OptimizingOverlay from "@/components/optimizing-overlay"
-import InsufficientResourcesWarning from "@/components/insufficient-resources-warning"
 import { ArrowRight, ArrowLeft } from "lucide-react"
 
 export default function BusOptimizationTab() {
-  const { routes, parameters, setResults, setKpis, isOptimizing, setIsOptimizing, setActiveStep } = useBusOptimization()
+  const {
+    routeData,
+    parameters,
+    setStrategicResults,
+    setScheduleResults,
+    isOptimizing,
+    setIsOptimizing,
+    setActiveTab,
+  } = useBusOptimization()
 
-  const [showInsufficientWarning, setShowInsufficientWarning] = useState(false)
-  const [startButtonHover, setStartButtonHover] = useState(false)
+  const [statusText, setStatusText] = useState("Optimizasyon başlatılıyor...")
 
   const handleStartOptimization = async () => {
-    if (routes.length === 0) {
+    if (routeData.length === 0) {
       return
     }
 
     setIsOptimizing(true)
-    setShowInsufficientWarning(false)
 
-    // Simulate optimization delay
-    setTimeout(() => {
-      const startTime = performance.now()
-      const { results, kpis, isFeasible } = runOptimization(routes, parameters)
-      const endTime = performance.now()
+    // --- Stratejik Optimizasyon ---
+    setStatusText("1/2: En uygun filo kompozisyonu belirleniyor...")
+    await new Promise(resolve => setTimeout(resolve, 500)) // UI update time
+    const strategicResults = runStrategicOptimization(routeData, parameters)
+    setStrategicResults(strategicResults)
 
-      setResults(results)
-      setKpis({
-        ...kpis,
-        optimizationTime: (endTime - startTime) / 1000,
-      })
+    // --- Operasyonel Çizelgeleme Optimizasyonu ---
+    setStatusText("2/2: 24 saatlik operasyonel sefer planı oluşturuluyor...")
+    await new Promise(resolve => setTimeout(resolve, 500)) // UI update time
+    const scheduleResults = runScheduleOptimization(strategicResults, routeData, parameters)
+    setScheduleResults(scheduleResults)
 
-      setIsOptimizing(false)
+    // --- Bitiş ---
+    setStatusText("Optimizasyon tamamlandı! Sonuçlar yükleniyor...")
+    await new Promise(resolve => setTimeout(resolve, 1000)) // allow user to read final status
 
-      if (!isFeasible) {
-        setShowInsufficientWarning(true)
-      } else {
-        // Move to the next step
-        setActiveStep("scheduleOptimization")
-      }
-    }, 2000)
-  }
-
-  const closeWarning = () => {
-    setShowInsufficientWarning(false)
+    setIsOptimizing(false)
+    setActiveTab("results")
   }
 
   const goBack = () => {
-    setActiveStep("parameters")
+    setActiveTab("parameters")
   }
 
   return (
     <div className="space-y-6">
-      {isOptimizing && <OptimizingOverlay />}
-      {showInsufficientWarning && (
-        <div onClick={closeWarning} className="cursor-pointer">
-          <InsufficientResourcesWarning />
-        </div>
-      )}
+      {isOptimizing && <OptimizingOverlay statusText={statusText} />}
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Otobüs Tipi Optimizasyonu</h2>
+          <h2 className="text-xl font-semibold">Optimizasyon Süreci</h2>
         </div>
 
-        <div className="rounded-lg bg-gradient-to-br from-gray-400/20 via-blue-400/10 to-gray-400/20 p-[1px] shadow-md">
-          <div className="rounded-lg bg-white/90 dark:bg-black/90 backdrop-blur-md p-6">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6">
             <div className="space-y-4">
-              <h3 className="text-lg font-medium">Optimizasyon Adımı 1: Otobüs Tipi Belirleme</h3>
+              <h3 className="text-lg font-medium">İki Aşamalı Optimizasyon</h3>
 
               <p className="text-muted-foreground">
-                Bu adımda, her hat için en uygun otobüs tipi kombinasyonu belirlenecektir. Algoritma, yolcu talebini
-                karşılarken toplam maliyeti (yakıt + bakım + amortisman + sürücü) minimize etmeye çalışacaktır.
+                Optimizasyon süreci, en verimli ve düşük maliyetli çözümü bulmak için iki ana adımdan oluşur:
               </p>
 
-              <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-md">
-                <h4 className="font-medium mb-2 text-blue-700 dark:text-blue-400">Optimizasyon Kriterleri:</h4>
-                <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
-                  <li>Her hattın zirve saat yolcu sayısı karşılanmalıdır</li>
-                  <li>Toplam maliyet (yakıt + bakım + amortisman + sürücü) minimize edilmelidir</li>
-                  <li>Filodaki mevcut otobüs sayısı aşılmamalıdır</li>
-                  <li>Karbon emisyonu hesaplanacak ve raporlanacaktır</li>
-                </ul>
-              </div>
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="flex-1 p-4 border rounded-lg bg-muted/40">
+                  <h4 className="font-semibold mb-2 text-primary">1. Stratejik Filo Belirleme</h4>
+                  <p className="text-sm text-muted-foreground">
+                    İlk olarak, 24 saatlik yolcu talebi verileri analiz edilir. Sistemin en yoğun olduğu "zirve an"
+                    tespit edilir ve bu talebi en düşük maliyetle karşılayacak olan ideal otobüs tipi (Minibüs,
+                    Solo, Körüklü) kompozisyonu belirlenir. Bu adım, "kaç tane hangi tip otobüse ihtiyacımız var?"
+                    sorusunu cevaplar.
+                  </p>
+                </div>
 
-              <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-md">
-                <h4 className="font-medium mb-2 text-amber-700 dark:text-amber-400">Optimizasyon Sonuçları:</h4>
-                <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
-                  <li>Her hat için atanacak midibüs, solo ve körüklü otobüs sayısı</li>
-                  <li>Her hat için maliyet detayları (yakıt, bakım, amortisman, sürücü)</li>
-                  <li>Toplam maliyet ve kilometre/yolcu başına maliyet</li>
-                  <li>Filo kullanım oranları ve kapasite kullanım yüzdeleri</li>
-                  <li>Toplam karbon emisyonu ve çevresel etki analizi</li>
-                </ul>
+                <div className="flex-1 p-4 border rounded-lg bg-muted/40">
+                  <h4 className="font-semibold mb-2 text-primary">2. Operasyonel Sefer Planlama</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Stratejik adımda belirlenen bu optimize edilmiş filo kullanılarak, 24 saatlik operasyon için
+                    detaylı bir sefer çizelgesi oluşturulur. Bu adımda, her bir otobüsün hangi hatta, hangi saatte,
+                    hangi yönde görev yapacağı planlanır. Amaç, belirlenen filoyu gün boyunca en verimli şekilde
+                    kullanmaktır.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <div className="flex justify-between mt-6">
-          <Button
-            onClick={goBack}
-            className="px-4 py-2 transition-all duration-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-            variant="outline"
-          >
+          <Button onClick={goBack} variant="outline">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Geri Dön
           </Button>
 
           <Button
             onClick={handleStartOptimization}
-            disabled={routes.length === 0 || isOptimizing}
-            className={`px-6 py-2 text-base transition-all duration-300 shadow-md hover:shadow-lg rounded-md ${
-              startButtonHover
-                ? "bg-gradient-to-r from-teal-600 via-blue-600 to-purple-600 scale-105"
-                : "bg-gradient-to-r from-teal-500 via-blue-500 to-purple-500"
-            }`}
-            onMouseEnter={() => setStartButtonHover(true)}
-            onMouseLeave={() => setStartButtonHover(false)}
+            disabled={routeData.length === 0 || isOptimizing}
+            className="bg-green-600 hover:bg-green-700 text-white font-bold"
           >
             <ArrowRight className="mr-2 h-5 w-5" />
             Optimizasyonu Başlat

@@ -1,6 +1,14 @@
 "use client"
 
 import { createContext, useContext, useState, type ReactNode } from "react"
+import type {
+  RouteData,
+  BusParameters,
+  StrategicResult,
+  ScheduleResult,
+  ScheduleParameters,
+  KPIData,
+} from "@/types"
 
 // RouteData tipini güncelle - her iki yön için ayrı uzunluk ve parkur süresi ekle
 export type RouteData = {
@@ -45,14 +53,17 @@ export type BusParameters = {
     depreciationCost: number // Depreciation cost per kilometer
     carbonEmission: number // Carbon emission per kilometer (kg/km)
   }
-  driverCost: number
+  driver: {
+    costPerHour: number
+  }
+  operationStartTime: number // 04:00 in minutes
   maxInterlining: number // Maximum number of routes a bus can serve
 }
 
 // Schedule optimization types
 // ScheduleParameters tipini güncelle - artık 24 saatlik operasyon için
 export type ScheduleParameters = {
-  operationStartTime: string // e.g., "04:00"
+  operationStartTime: number // e.g., 240 for 04:00
   operationEndTime: string // e.g., "04:00" (next day)
 }
 
@@ -113,25 +124,25 @@ export type KPIData = {
 }
 
 type BusOptimizationContextType = {
-  routes: RouteData[]
-  setRoutes: (routes: RouteData[]) => void
+  routeData: RouteData[]
+  setRouteData: (routes: RouteData[]) => void
   parameters: BusParameters
   setParameters: (parameters: BusParameters) => void
-  results: OptimizationResult[]
-  setResults: (results: OptimizationResult[]) => void
+  strategicResults: StrategicResult | null
+  setStrategicResults: (results: StrategicResult | null) => void
   scheduleParameters: ScheduleParameters
   setScheduleParameters: (scheduleParameters: ScheduleParameters) => void
   scheduleResults: ScheduleResult | null
   setScheduleResults: (scheduleResults: ScheduleResult | null) => void
   kpis: KPIData | null
-  setKpis: (kpis: KPIData) => void
+  setKpis: (kpis: KPIData | null) => void
   isOptimizing: boolean
   setIsOptimizing: (isOptimizing: boolean) => void
-  activeStep: string
-  setActiveStep: (step: string) => void
+  activeTab: string
+  setActiveTab: (tab: string) => void
+  resetOptimization: () => void
 }
 
-// Varsayılan parametrelere maxInterlining ekleyelim
 const defaultParameters: BusParameters = {
   minibus: {
     capacity: 60,
@@ -157,36 +168,45 @@ const defaultParameters: BusParameters = {
     depreciationCost: 6,
     carbonEmission: 1.4,
   },
-  driverCost: 38,
-  maxInterlining: 0, // Varsayılan olarak her otobüs sadece bir hatta çalışabilir (interlining yok)
-}
-
-const defaultScheduleParameters: ScheduleParameters = {
-  operationStartTime: "04:00",
-  operationEndTime: "28:00", // Represents 04:00 next day for easier calculation
+  driver: {
+    costPerHour: 150,
+  },
+  operationStartTime: 240, // 04:00 in minutes
+  maxInterlining: 1,
 }
 
 const BusOptimizationContext = createContext<BusOptimizationContextType | undefined>(undefined)
 
 export function BusOptimizationProvider({ children }: { children: ReactNode }) {
-  const [routes, setRoutes] = useState<RouteData[]>([])
+  const [routeData, setRouteData] = useState<RouteData[]>([])
   const [parameters, setParameters] = useState<BusParameters>(defaultParameters)
-  const [results, setResults] = useState<OptimizationResult[]>([])
-  const [scheduleParameters, setScheduleParameters] = useState<ScheduleParameters>(defaultScheduleParameters)
+  const [strategicResults, setStrategicResults] = useState<StrategicResult | null>(null)
+  const [scheduleParameters, setScheduleParameters] = useState<ScheduleParameters>({
+    operationStartTime: 240,
+  })
   const [scheduleResults, setScheduleResults] = useState<ScheduleResult | null>(null)
   const [kpis, setKpis] = useState<KPIData | null>(null)
   const [isOptimizing, setIsOptimizing] = useState(false)
-  const [activeStep, setActiveStep] = useState<string>("parameters")
+  const [activeTab, setActiveTab] = useState<string>("parameters")
+
+  const resetOptimization = () => {
+    setRouteData([])
+    setStrategicResults(null)
+    setScheduleResults(null)
+    setKpis(null)
+    setActiveTab("parameters")
+    setIsOptimizing(false)
+  }
 
   return (
     <BusOptimizationContext.Provider
       value={{
-        routes,
-        setRoutes,
+        routeData,
+        setRouteData,
         parameters,
         setParameters,
-        results,
-        setResults,
+        strategicResults,
+        setStrategicResults,
         scheduleParameters,
         setScheduleParameters,
         scheduleResults,
@@ -195,8 +215,9 @@ export function BusOptimizationProvider({ children }: { children: ReactNode }) {
         setKpis,
         isOptimizing,
         setIsOptimizing,
-        activeStep,
-        setActiveStep,
+        activeTab,
+        setActiveTab,
+        resetOptimization,
       }}
     >
       {children}
