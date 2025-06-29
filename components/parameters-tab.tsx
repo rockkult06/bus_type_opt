@@ -53,11 +53,11 @@ export default function ParametersTab() {
         if (lines.length <= 1) throw new Error("CSV dosyası boş veya geçersiz.")
 
         const headerLine = lines[0]
-        const separator = headerLine.includes(";") ? ";" : ","
+        const separator = headerLine.includes("\t") ? "\t" : headerLine.includes(";") ? ";" : ","
         const headers = headerLine.split(separator).map((h) => h.trim())
 
         // --- NEW MORE ROBUST HEADER FINDING ---
-        const normalize = (str: string) => str.toLowerCase().replace(/\s+/g, "").replace("->", "→")
+        const normalize = (str: string) => str.toLowerCase().replace(/\s+/g, "").replace("->", "→").replace(/\?/g, "→")
 
         const findHeaderIndex = (possibleNames: string[]): number => {
           for (const name of possibleNames) {
@@ -88,7 +88,7 @@ export default function ParametersTab() {
         }
 
         // --- NEW HOURLY DEMAND PARSING ---
-        const demandColumnRegex = /(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*(A(→|->)B|B(→|->)A)/i
+        const demandColumnRegex = /(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})\s*(A(→|->|\?)B|B(→|->|\?)A)/i
 
         const demandColumns = (
           headers
