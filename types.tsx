@@ -6,8 +6,7 @@ export type RouteData = {
   routeLengthBtoA: number
   travelTimeAtoB: number
   travelTimeBtoA: number
-  peakPassengersAtoB: number
-  peakPassengersBtoA: number
+  hourlyDemand: { hour: number; demandAtoB: number; demandBtoA: number }[]
 }
 
 // BusParameters tipini güncelleyelim
@@ -36,27 +35,45 @@ export type BusParameters = {
     depreciationCost: number
     carbonEmission: number
   }
-  driverCost: number
+  driver: {
+    costPerHour: number
+  }
+  operationStartTime: number // Operation start time in minutes from midnight
   maxInterlining: number // Maximum number of routes a bus can serve
+}
+
+export type Trip = {
+  tripId: string
+  busId: string
+  busType: "minibus" | "solo" | "articulated"
+  routeNo: string
+  direction: "AtoB" | "BtoA"
+  startTime: number // in minutes from operation start
+  endTime: number // in minutes from operation start
 }
 
 // ScheduleResult tipini güncelle
 export type ScheduleResult = {
-  frequencyAB: number
-  frequencyBA: number
-  tripsAB: number
-  tripsBA: number
-  totalBuses: number
-  scheduleAB: Array<{ time: string; busId: string; busType?: string; routeNo?: string }>
-  scheduleBA: Array<{ time: string; busId: string; busType?: string; routeNo?: string }>
-  busUtilization: Record<string, { trips: number; busType?: string }>
-  routeSchedules?: Record<
-    string,
-    {
-      scheduleAB: Array<{ time: string; busId: string; busType?: string }>
-      scheduleBA: Array<{ time: string; busId: string; busType?: string }>
-    }
-  >
+  schedule: Trip[]
+  stats: {
+    totalTrips: number
+    totalDistance: number
+    totalDuration: number
+    busUtilization: Record<string, { trips: number; busType: string; routes: number[] }>
+  }
+}
+
+export type StrategicResult = {
+  recommendedFleet: {
+    minibus: number
+    solo: number
+    articulated: number
+  }
+  totalCost: number
+  peakDemand: {
+    hour: number
+    demand: number
+  }
 }
 
 export type KPIData = {
