@@ -20,8 +20,9 @@ import {
   ArrowRight,
   RouteIcon,
   AlertCircle,
+  Clock,
 } from "lucide-react"
-import { useBusOptimization } from "@/context/bus-optimization-context"
+import { useBusOptimization, type RouteData, type HourlyDemand } from "@/context/bus-optimization-context"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Progress } from "@/components/ui/progress"
 
@@ -47,68 +48,70 @@ export default function ParametersTab() {
     reader.onload = (event) => {
       try {
         const csvData = event.target?.result as string
+        const cleanData = csvData.replace(/^\uFEFF/, "") // Remove BOM
+        const lines = cleanData.split(/\r?\n/).filter((line) => line.trim())
 
-        // Check for BOM (Byte Order Mark) and remove if present
-        const cleanData = csvData.replace(/^\uFEFF/, "")
+        if (lines.length <= 1) throw new Error("CSV dosyası boş veya geçersiz.")
 
-        // Split by newlines, handling both Windows and Unix line endings
-        const lines = cleanData.split(/\r?\n/)
+        const headerLine = lines[0]
+        const separator = headerLine.includes(";") ? ";" : ","
+        const headers = headerLine.split(separator).map((h) => h.trim())
 
-        // Check if we have data
-        if (lines.length <= 1) {
-          throw new Error("CSV dosyası boş veya geçersiz.")
+        // Find indices for fixed columns
+        const routeNoIndex = headers.findIndex((h) => h.includes("Hat No"))
+        const routeNameIndex = headers.findIndex((h) => h.includes("Hat Adı"))
+        const lengthAtoBIndex = headers.findIndex((h) => h.includes("A→B Hat Uzunluğu"))
+        const lengthBtoAIndex = headers.findIndex((h) => h.includes("B→A Hat Uzunluğu"))
+        const timeAtoBIndex = headers.findIndex((h) => h.includes("A→B Parkur Süresi"))
+        const timeBtoAIndex = headers.findIndex((h) => h.includes("B→A Parkur Süresi"))
+
+        if ([routeNoIndex, routeNameIndex, lengthAtoBIndex, lengthBtoAIndex, timeAtoBIndex, timeBtoAIndex].includes(-1)) {
+          throw new Error("CSV başlıkları eksik veya hatalı. Gerekli sütunlar bulunamadı.")
         }
 
-        // Parse the header to determine if we're using semicolons or commas
-        const firstLine = lines[0]
-        const separator = firstLine.includes(";") ? ";" : ","
+        const parsedRoutes: RouteData[] = lines.slice(1).map((line) => {
+          const values = line.split(separator).map((item) => item.trim())
+          const hourlyDemand: HourlyDemand[] = []
 
-        // Skip header row
-        const parsedRoutes = lines
-          .slice(1)
-          .filter((line) => line.trim())
-          .map((line) => {
-            const values = line.split(separator).map((item) => item.trim())
+          // Parse hourly demand columns
+          for (let hour = 4; hour < 28; hour++) {
+            const currentHour = hour % 24
+            const nextHour = (hour + 1) % 24
+            const timeSlotLabel = `${String(currentHour).padStart(2, "0")}:00-${String(nextHour).padStart(2, "0")}`
 
-            if (values.length < 8) {
-              throw new Error("CSV formatı geçersiz. Tüm alanlar doldurulmalıdır.")
+            const headerAtoB = headers.find((h) => h.includes(timeSlotLabel) && h.includes("A→B Yolcu"))
+            const headerBtoA = headers.find((h) => h.includes(timeSlotLabel) && h.includes("B→A Yolcu"))
+
+            if (headerAtoB && headerBtoA) {
+              const indexAtoB = headers.indexOf(headerAtoB)
+              const indexBtoA = headers.indexOf(headerBtoA)
+              const passengersAtoB = Number.parseInt(values[indexAtoB] || "0")
+              const passengersBtoA = Number.parseInt(values[indexBtoA] || "0")
+
+              hourlyDemand.push({
+                hour: currentHour,
+                passengersAtoB: isNaN(passengersAtoB) ? 0 : passengersAtoB,
+                passengersBtoA: isNaN(passengersBtoA) ? 0 : passengersBtoA,
+              })
             }
+          }
 
-            const [
-              routeNo,
-              routeName,
-              routeLengthAtoB,
-              routeLengthBtoA,
-              travelTimeAtoB,
-              travelTimeBtoA,
-              peakPassengersAtoB,
-              peakPassengersBtoA,
-            ] = values
+          const route: RouteData = {
+            routeNo: values[routeNoIndex],
+            routeName: values[routeNameIndex],
+            routeLengthAtoB: Number.parseFloat(values[lengthAtoBIndex] || "0"),
+            routeLengthBtoA: Number.parseFloat(values[lengthBtoAIndex] || "0"),
+            travelTimeAtoB: Number.parseInt(values[timeAtoBIndex] || "0"),
+            travelTimeBtoA: Number.parseInt(values[timeBtoAIndex] || "0"),
+            hourlyDemand: hourlyDemand,
+          }
 
-            if (
-              !routeNo ||
-              !routeName ||
-              !routeLengthAtoB ||
-              !routeLengthBtoA ||
-              !travelTimeAtoB ||
-              !travelTimeBtoA ||
-              !peakPassengersAtoB ||
-              !peakPassengersBtoA
-            ) {
-              throw new Error("CSV formatı geçersiz. Tüm alanlar doldurulmalıdır.")
-            }
+          if (!route.routeNo || !route.routeName) {
+            throw new Error(`Bir veya daha fazla satırda Hat No veya Hat Adı eksik: ${line}`)
+          }
 
-            return {
-              routeNo,
-              routeName,
-              routeLengthAtoB: Number.parseFloat(routeLengthAtoB),
-              routeLengthBtoA: Number.parseFloat(routeLengthBtoA),
-              travelTimeAtoB: Number.parseInt(travelTimeAtoB),
-              travelTimeBtoA: Number.parseInt(travelTimeBtoA),
-              peakPassengersAtoB: Number.parseInt(peakPassengersAtoB),
-              peakPassengersBtoA: Number.parseInt(peakPassengersBtoA),
-            }
-          })
+          return route
+        })
 
         // Simulate a delay for the progress bar
         setTimeout(() => {
@@ -744,8 +747,6 @@ export default function ParametersTab() {
                           <TableHead className="font-medium text-sm py-2">B→A Uzunluk (km)</TableHead>
                           <TableHead className="font-medium text-sm py-2">A→B Süre (dk)</TableHead>
                           <TableHead className="font-medium text-sm py-2">B→A Süre (dk)</TableHead>
-                          <TableHead className="font-medium text-sm py-2">A→B Yolcu</TableHead>
-                          <TableHead className="font-medium text-sm py-2">B→A Yolcu</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -760,8 +761,6 @@ export default function ParametersTab() {
                             <TableCell className="py-1.5">{route.routeLengthBtoA}</TableCell>
                             <TableCell className="py-1.5">{route.travelTimeAtoB}</TableCell>
                             <TableCell className="py-1.5">{route.travelTimeBtoA}</TableCell>
-                            <TableCell className="py-1.5">{route.peakPassengersAtoB}</TableCell>
-                            <TableCell className="py-1.5">{route.peakPassengersBtoA}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
