@@ -27,7 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Progress } from "@/components/ui/progress"
 
 export default function ParametersTab() {
-  const { routes, setRoutes, parameters, setParameters, setActiveStep } = useBusOptimization()
+  const { routeData, setRouteData, parameters, setParameters, setActiveTab } = useBusOptimization()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [csvError, setCsvError] = useState<string | null>(null)
@@ -164,7 +164,7 @@ export default function ParametersTab() {
         
         // Simulate a delay for the progress bar
         setTimeout(() => {
-          setRoutes(parsedRoutes)
+          setRouteData(parsedRoutes)
           setUploadProgress(100)
           setTimeout(() => {
             setIsUploading(false)
@@ -210,18 +210,20 @@ export default function ParametersTab() {
 
     setParameters({
       ...parameters,
-      driverCost: value,
+      driver: {
+        costPerHour: value,
+      },
     })
   }
 
   const handleContinue = () => {
-    if (routes.length === 0) {
+    if (routeData.length === 0) {
       setCsvError("Lütfen önce CSV dosyası yükleyin.")
       return
     }
 
     // Move to the next step
-    setActiveStep("busOptimization")
+    setActiveTab("busOptimization")
   }
 
   return (
@@ -628,7 +630,7 @@ export default function ParametersTab() {
                   <Input
                     id="driver-cost"
                     type="number"
-                    value={isNaN(parameters.driverCost) ? "" : parameters.driverCost}
+                    value={isNaN(parameters.driver.costPerHour) ? "" : parameters.driver.costPerHour}
                     onChange={(e) => {
                       const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value)
                       handleDriverCostChange(value)
@@ -751,7 +753,7 @@ export default function ParametersTab() {
 
                   <Button
                     onClick={handleContinue}
-                    disabled={routes.length === 0}
+                    disabled={routeData.length === 0}
                     className={`px-5 h-10 text-sm transition-all duration-300 shadow-md rounded-md ${
                       startButtonHover
                         ? "bg-gradient-to-r from-teal-600 via-blue-600 to-purple-600 scale-105 shadow-lg"
@@ -780,7 +782,7 @@ export default function ParametersTab() {
               </div>
             </div>
 
-            {routes.length > 0 && (
+            {routeData.length > 0 && (
               <Card className="shadow-md overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
                 <CardHeader className="py-2 px-4 bg-gray-50 dark:bg-gray-900">
                   <CardTitle className="text-base">Yüklenen Hat Verileri</CardTitle>
@@ -799,7 +801,7 @@ export default function ParametersTab() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {routes.map((route, index) => (
+                        {routeData.map((route, index) => (
                           <TableRow
                             key={index}
                             className="hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors border-b border-gray-100 dark:border-gray-800"
@@ -824,7 +826,7 @@ export default function ParametersTab() {
         <div className="flex justify-center mt-5">
           <Button
             onClick={handleContinue}
-            disabled={routes.length === 0}
+            disabled={routeData.length === 0}
             className={`px-6 py-2 text-base transition-all duration-300 shadow-md hover:shadow-lg rounded-md ${
               startButtonHover
                 ? "bg-gradient-to-r from-teal-600 via-blue-600 to-purple-600 scale-105"
