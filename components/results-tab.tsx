@@ -206,7 +206,7 @@ export default function ResultsTab() {
     
     // Total cost and passengers need to be derived differently
     // This is a simplified placeholder, ideally KPIs should be part of stats
-    const totalPassengers = routeData.reduce((acc: number, route: RouteData) => acc + route.hourlyDemand.reduce((sum: number, dem) => sum + dem.demandAtoB + dem.demandBtoA, 0), 0)
+    const totalPassengers = routeData.reduce((acc: number, route: RouteData) => acc + route.hourlyDemand.reduce((sum: number, dem) => sum + dem.passengersAtoB + dem.passengersBtoA, 0), 0)
     const totalCost = strategicResults.totalCost // Using strategic cost as a placeholder
 
     const costPerKm = totalDistance > 0 ? totalCost / totalDistance : 0

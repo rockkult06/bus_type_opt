@@ -1,85 +1,93 @@
-// RouteData tipini güncelle
-export type RouteData = {
-  routeNo: string
-  routeName: string
-  routeLengthAtoB: number
-  routeLengthBtoA: number
-  travelTimeAtoB: number
-  travelTimeBtoA: number
-  hourlyDemand: { hour: number; demandAtoB: number; demandBtoA: number }[]
+/**
+ * Temel Veri Tipleri
+ * Bu dosya, tüm uygulama genelinde kullanılan temel TypeScript arayüzlerini ve tiplerini tanımlar.
+ */
+
+// 1. Otobüslerin ve Operasyonel Parametrelerin Tanımı
+export interface BusTypeParameters {
+  capacity: number // Yolcu kapasitesi
+  fleetCount: number // Filodaki mevcut otobüs sayısı
+  fuelCost: number // Yakıt maliyeti (TL/km)
+  maintenanceCost: number // Bakım maliyeti (TL/km)
+  depreciationCost: number // Amortisman maliyeti (TL/km)
+  carbonEmission: number // Karbon emisyonu (kg/km)
 }
 
-// BusParameters tipini güncelleyelim
-export type BusParameters = {
-  minibus: {
-    capacity: number
-    fuelCost: number
-    fleetCount: number
-    maintenanceCost: number
-    depreciationCost: number
-    carbonEmission: number
-  }
-  solo: {
-    capacity: number
-    fuelCost: number
-    fleetCount: number
-    maintenanceCost: number
-    depreciationCost: number
-    carbonEmission: number
-  }
-  articulated: {
-    capacity: number
-    fuelCost: number
-    fleetCount: number
-    maintenanceCost: number
-    depreciationCost: number
-    carbonEmission: number
-  }
+export interface BusParameters {
+  minibus: BusTypeParameters
+  solo: BusTypeParameters
+  articulated: BusTypeParameters
   driver: {
     costPerHour: number
   }
-  operationStartTime: number // Operation start time in minutes from midnight
-  maxInterlining: number // Maximum number of routes a bus can serve
+  operationStartTime: number // Operasyon başlangıç saati (04:00 = 240 dakika)
+  maxInterlining: number // Bir otobüsün hizmet verebileceği maksimum farklı hat sayısı
 }
 
-export type Trip = {
-  tripId: string
-  busId: string
-  busType: "minibus" | "solo" | "articulated"
+// 2. Hat ve Talep Verilerinin Tanımı (CSV'den gelen veri)
+export interface HourlyDemand {
+  hour: number // Günün saati (örn: 4, 13, 23)
+  passengersAtoB: number
+  passengersBtoA: number
+}
+
+export interface RouteData {
   routeNo: string
-  direction: "AtoB" | "BtoA"
-  startTime: number // in minutes from operation start
-  endTime: number // in minutes from operation start
+  routeName: string
+  routeLengthAtoB: number // A'dan B'ye hat uzunluğu (km)
+  routeLengthBtoA: number // B'den A'ya hat uzunluğu (km)
+  travelTimeAtoB: number // A'dan B'ye parkur süresi (dk)
+  travelTimeBtoA: number // B'den A'ya parkur süresi (dk)
+  hourlyDemand: HourlyDemand[]
 }
 
-// ScheduleResult tipini güncelle
-export type ScheduleResult = {
-  schedule: Trip[]
-  stats: {
-    totalTrips: number
-    totalDistance: number
-    totalDuration: number
-    busUtilization: Record<string, { trips: number; busType: string; routes: number[] }>
-  }
-}
+// 3. Optimizasyon Sonuç Tipleri
 
-export type StrategicResult = {
+// Stratejik Optimizasyon (lib/optimization.ts) Sonucu
+export interface StrategicResult {
   recommendedFleet: {
     minibus: number
     solo: number
     articulated: number
   }
-  totalCost: number
+  totalCost: number // Bu, sadece karşılaştırma için kullanılan tahmini bir maliyettir
   peakDemand: {
     hour: number
     demand: number
   }
 }
 
-export type KPIData = {
+// Sefer Çizelgesi (lib/schedule-optimization.ts) Sonucu
+export interface Trip {
+  tripId: string
+  busId: string
+  busType: "minibus" | "solo" | "articulated"
+  routeNo: string
+  direction: "AtoB" | "BtoA"
+  startTime: number // Operasyon başlangıcından itibaren dakika (örn: 04:00 -> 0)
+  endTime: number // Operasyon başlangıcından itibaren dakika
+}
+
+export interface ScheduleResult {
+  schedule: Trip[]
+  stats: {
+    totalTrips: number
+    totalDistance: number // Toplam kat edilen mesafe (km)
+    totalDuration: number // Toplam sefer süresi (dakika)
+    busUtilization: {
+      [busId: string]: {
+        trips: number
+        busType: "minibus" | "solo" | "articulated"
+        routes: string[] // hizmet verilen hat numaraları
+      }
+    }
+  }
+}
+
+// Sonuçlar sekmesinde kullanılacak birleşik KPI verisi
+export interface KPIData {
   totalPassengers: number
   totalDistance: number
-  optimizationTime: number
   totalFuelCost: number
   totalMaintenanceCost: number
   totalDepreciationCost: number
@@ -89,7 +97,7 @@ export type KPIData = {
   costPerPassenger: number
   totalCarbonEmission: number
   carbonPerPassenger: number
-  carbonSaved: number
+  carbonSaved: number // Bu, gelecekteki bir özellik için yer tutucudur
 }
 
 // OptimizationResult tipini güncelle
