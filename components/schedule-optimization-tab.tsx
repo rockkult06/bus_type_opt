@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useBusOptimization } from "@/context/bus-optimization-context"
+import { useBusOptimization, type ScheduleResult } from "@/context/bus-optimization-context"
 import { createSchedule } from "@/lib/schedule-optimization"
 import OptimizingOverlay from "@/components/optimizing-overlay"
 import InsufficientResourcesWarning from "@/components/insufficient-resources-warning"
@@ -37,19 +37,16 @@ export default function ScheduleOptimizationTab() {
 
     // Simulate optimization delay
     setTimeout(() => {
-      const startTime = performance.now()
+      const { scheduleResult, isFeasible } = createSchedule(results, scheduleParameters, routes, parameters)
 
-      // Burada parameters'ı doğrudan geçiriyoruz, böylece maxInterlining değeri korunur
-      const result = createSchedule(results, scheduleParameters, routes, parameters)
-      const endTime = performance.now()
-
-      // Sonuçları ayarla
-      setScheduleResults(result.scheduleResult)
-
+      setScheduleResults(scheduleResult)
       setIsOptimizing(false)
 
-      // Yetersiz kaynak uyarısını gösterme, her zaman sonuçlar sayfasına git
-      setActiveStep("results")
+      if (!isFeasible) {
+        setShowInsufficientWarning(true)
+      } else {
+        setActiveStep("results")
+      }
     }, 2000)
   }
 
@@ -98,11 +95,11 @@ export default function ScheduleOptimizationTab() {
                       <Input
                         id="timeRangeStart"
                         type="time"
-                        value={scheduleParameters.timeRange.start}
+                        value={scheduleParameters.operationStartTime}
                         onChange={(e) =>
                           setScheduleParameters({
                             ...scheduleParameters,
-                            timeRange: { ...scheduleParameters.timeRange, start: e.target.value },
+                            operationStartTime: e.target.value,
                           })
                         }
                         className="w-full"
@@ -118,11 +115,11 @@ export default function ScheduleOptimizationTab() {
                       <Input
                         id="timeRangeEnd"
                         type="time"
-                        value={scheduleParameters.timeRange.end}
+                        value={scheduleParameters.operationEndTime}
                         onChange={(e) =>
                           setScheduleParameters({
                             ...scheduleParameters,
-                            timeRange: { ...scheduleParameters.timeRange, end: e.target.value },
+                            operationEndTime: e.target.value,
                           })
                         }
                         className="w-full"
