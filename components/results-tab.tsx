@@ -164,6 +164,7 @@ const calculateCostPerKm = (
 }
 
 const formatTime = (minutes: number) => {
+  if (isNaN(minutes)) return "00:00"
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
@@ -180,15 +181,15 @@ export default function ResultsTab() {
   } = useBusOptimization()
 
   const [activeTabKey, setActiveTabKey] = useState("summary")
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: string } | null>({
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Trip; direction: string } | null>({
     key: "startTime",
     direction: "ascending",
   })
-  const [filters, setFilters] = useState<any>({})
+  const [filters, setFilters] = useState<Partial<Record<keyof Trip, string>>>({})
 
   // Memoized calculations for performance
   const summaryStats = useMemo(() => {
-    if (!strategicResults || !scheduleResults?.schedule || !routeData || !parameters) {
+    if (!strategicResults || !scheduleResults || !scheduleResults.stats || !routeData) {
       return {
         totalCost: 0,
         totalDistance: 0,
@@ -200,12 +201,15 @@ export default function ResultsTab() {
       }
     }
 
-    const totalCost = calculateTotalCost(scheduleResults, routeData, parameters)
-    const totalDistance = calculateTotalDistance(scheduleResults, routeData)
-    const totalPassengers = calculateTotalPassengers(routeData)
+    const { stats } = scheduleResults
+    const { totalDistance, totalDuration, totalTrips } = stats
+    
+    // Total cost and passengers need to be derived differently
+    // This is a simplified placeholder, ideally KPIs should be part of stats
+    const totalPassengers = routeData.reduce((acc: number, route: RouteData) => acc + route.hourlyDemand.reduce((sum: number, dem) => sum + dem.demandAtoB + dem.demandBtoA, 0), 0)
+    const totalCost = strategicResults.totalCost // Using strategic cost as a placeholder
+
     const costPerKm = totalDistance > 0 ? totalCost / totalDistance : 0
-    const totalTrips = scheduleResults.schedule.length
-    const totalDuration = scheduleResults.schedule.reduce((sum: number, trip: Trip) => sum + (trip.endTime - trip.startTime), 0)
     const avgTripDuration = totalTrips > 0 ? totalDuration / totalTrips : 0
 
     return {
@@ -217,7 +221,7 @@ export default function ResultsTab() {
       totalTrips,
       avgTripDuration,
     }
-  }, [strategicResults, scheduleResults, routeData, parameters])
+  }, [strategicResults, scheduleResults, routeData])
 
   const sortedAndFilteredSchedule = useMemo(() => {
     if (!scheduleResults?.schedule) return []
@@ -228,9 +232,8 @@ export default function ResultsTab() {
     Object.keys(filters).forEach(key => {
       const filterValue = filters[key as keyof typeof filters]
       if (filterValue) {
-        sched = sched.filter((item: Trip) => {
+        sched = sched.filter(item => {
           const itemValue = item[key as keyof typeof item]
-          if (itemValue === undefined) return true
           return itemValue?.toString().toLowerCase().includes(filterValue.toLowerCase())
         })
       }
@@ -239,8 +242,8 @@ export default function ResultsTab() {
     // Sorting
     if (sortConfig !== null) {
       sched.sort((a, b) => {
-        const aVal = a[sortConfig.key as keyof typeof a]
-        const bVal = b[sortConfig.key as keyof typeof b]
+        const aVal = a[sortConfig.key]
+        const bVal = b[sortConfig.key]
         if (aVal < bVal) {
           return sortConfig.direction === "ascending" ? -1 : 1
         }
@@ -253,7 +256,7 @@ export default function ResultsTab() {
     return sched
   }, [scheduleResults, sortConfig, filters])
 
-  const requestSort = (key: string) => {
+  const requestSort = (key: keyof Trip) => {
     let direction = "ascending"
     if (sortConfig && sortConfig.key === key && sortConfig.direction === "ascending") {
       direction = "descending"
@@ -261,21 +264,19 @@ export default function ResultsTab() {
     setSortConfig({ key, direction })
   }
 
-  const getSortIcon = (columnId: string) => {
+  const getSortIcon = (columnId: keyof Trip) => {
     if (!sortConfig || sortConfig.key !== columnId) {
       return <ArrowUpDown className="ml-2 h-4 w-4" />
     }
-    if (sortConfig.direction === "ascending") {
-      return <ArrowUp className="ml-2 h-4 w-4" />
-    }
-    if (sortConfig.direction === "descending") {
-      return <ArrowDown className="ml-2 h-4 w-4" />
-    }
-    return <ArrowUpDown className="ml-2 h-4 w-4" />
+    return sortConfig.direction === "ascending" ? (
+      <ArrowUp className="ml-2 h-4 w-4" />
+    ) : (
+      <ArrowDown className="ml-2 h-4 w-4" />
+    )
   }
 
-  const handleFilterChange = (columnId: string, value: any) => {
-    setFilters((prev: any) => ({ ...prev, [columnId]: value }))
+  const handleFilterChange = (columnId: keyof Trip, value: string) => {
+    setFilters((prev: Partial<Record<keyof Trip, string>>) => ({ ...prev, [columnId]: value }))
   }
 
   const clearAllFilters = () => {
@@ -285,7 +286,7 @@ export default function ResultsTab() {
   const getUniqueValues = (columnId: keyof Trip) => {
     if (!scheduleResults?.schedule) return []
     const unique = new Set(scheduleResults.schedule.map((item: Trip) => item[columnId]))
-    return Array.from(unique)
+    return Array.from(unique) as string[]
   }
 
   const exportToExcel = () => {
@@ -327,10 +328,10 @@ export default function ResultsTab() {
 
   if (!strategicResults || !scheduleResults) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
-        <p className="text-lg font-semibold">Optimizasyon sonuçları yükleniyor veya bulunamadı.</p>
-        <p className="text-muted-foreground">Lütfen bekleyin veya optimizasyonu yeniden başlatın.</p>
-        <Button onClick={goBack} className="mt-4">
+      <div className="flex flex-col items-center justify-center h-96 text-center">
+        <h2 className="text-xl font-semibold">Optimizasyon sonuçları yükleniyor veya bulunamadı.</h2>
+        <p className="text-muted-foreground mt-2">Lütfen bekleyin veya optimizasyonu yeniden başlatın.</p>
+        <Button onClick={() => setActiveTab("parameters")} className="mt-4">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Geri Dön
         </Button>
@@ -369,7 +370,7 @@ export default function ResultsTab() {
           <h1 className="text-2xl font-bold tracking-tight">Optimizasyon Sonuçları</h1>
           <p className="text-muted-foreground mt-1">Stratejik ve operasyonel planlama sonuçlarının özeti.</p>
         </div>
-        <Button onClick={goBack} variant="outline">
+        <Button onClick={() => setActiveTab("parameters")} variant="outline">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Yeni Optimizasyon
         </Button>
@@ -450,21 +451,21 @@ export default function ResultsTab() {
                   <Bus className="h-8 w-8 text-muted-foreground" />
                   <div className="flex-1 space-y-1">
                     <p className="text-sm font-medium leading-none">Minibüs</p>
-                    <p className="text-2xl font-semibold">{summaryStats.fleet.minibus}</p>
+                    <p className="text-2xl font-semibold">{summaryStats.fleet?.minibus || 0}</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                   <BusFront className="h-8 w-8 text-muted-foreground" />
                   <div className="flex-1 space-y-1">
                     <p className="text-sm font-medium leading-none">Solo Otobüs</p>
-                    <p className="text-2xl font-semibold">{summaryStats.fleet.solo}</p>
+                    <p className="text-2xl font-semibold">{summaryStats.fleet?.solo || 0}</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                   <Bus className="h-10 w-10 text-muted-foreground" />
                   <div className="flex-1 space-y-1">
                     <p className="text-sm font-medium leading-none">Körüklü Otobüs</p>
-                    <p className="text-2xl font-semibold">{summaryStats.fleet.articulated}</p>
+                    <p className="text-2xl font-semibold">{summaryStats.fleet?.articulated || 0}</p>
                   </div>
                 </div>
               </CardContent>
@@ -498,15 +499,15 @@ export default function ResultsTab() {
                 </div>
                 <div className="flex-1 min-w-[150px]">
                   <Label htmlFor="filter-busType">Otobüs Tipi</Label>
-                  <Select onValueChange={value => handleFilterChange("busType", value)} value={filters.busType || ""}>
+                  <Select onValueChange={value => handleFilterChange("busType", value === 'all' ? '' : value)} value={filters.busType || "all"}>
                     <SelectTrigger id="filter-busType" className="mt-1 w-full">
                       <SelectValue placeholder="Tümü" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Tümü</SelectItem>
+                      <SelectItem value="all">Tümü</SelectItem>
                       {getUniqueValues("busType").map(val => (
-                        <SelectItem key={val as string} value={val as string}>
-                          {val as string}
+                        <SelectItem key={val} value={val}>
+                          {val}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -554,22 +555,30 @@ export default function ResultsTab() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedAndFilteredSchedule.map((trip: Trip, index: number) => (
-                      <TableRow key={trip.tripId || index}>
-                        <TableCell>{trip.routeNo}</TableCell>
-                        <TableCell>{trip.direction}</TableCell>
-                        <TableCell>
-                          <span
-                            className={`inline-block w-3 h-3 rounded-full mr-2 ${getBusColorClass(trip.busId)}`}
-                          ></span>
-                          {trip.busId}
+                    {sortedAndFilteredSchedule.length > 0 ? (
+                      sortedAndFilteredSchedule.map((trip: Trip, index: number) => (
+                        <TableRow key={trip.tripId || index}>
+                          <TableCell>{trip.routeNo}</TableCell>
+                          <TableCell>{trip.direction}</TableCell>
+                          <TableCell>
+                            <span
+                              className={`inline-block w-3 h-3 rounded-full mr-2 ${getBusColorClass(trip.busId)}`}
+                            ></span>
+                            {trip.busId}
+                          </TableCell>
+                          <TableCell>{trip.busType}</TableCell>
+                          <TableCell>{formatTime(trip.startTime)}</TableCell>
+                          <TableCell>{formatTime(trip.endTime)}</TableCell>
+                          <TableCell>{trip.endTime - trip.startTime}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center">
+                          Filtrelerle eşleşen sefer bulunamadı.
                         </TableCell>
-                        <TableCell>{trip.busType}</TableCell>
-                        <TableCell>{formatTime(trip.startTime)}</TableCell>
-                        <TableCell>{formatTime(trip.endTime)}</TableCell>
-                        <TableCell>{trip.endTime - trip.startTime}</TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -582,13 +591,21 @@ export default function ResultsTab() {
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
               <div className="p-6">
                 <h3 className="text-lg font-semibold">Otobüs Görevlendirme Zaman Çizelgesi</h3>
-                <BusScheduleTimeline scheduleResults={scheduleResults} routes={routeData || []} />
+                {scheduleResults?.schedule?.length > 0 ? (
+                  <BusScheduleTimeline scheduleResults={scheduleResults} routes={routeData || []} />
+                ) : (
+                  <div className="text-center text-muted-foreground py-8">Görselleştirilecek çizelge verisi bulunamadı.</div>
+                )}
               </div>
             </div>
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
               <div className="p-6">
                 <h3 className="text-lg font-semibold">Hat Bazında Sefer Zaman Çizelgesi</h3>
-                <RouteScheduleTimeline scheduleResults={scheduleResults} routes={routeData || []} />
+                {scheduleResults?.schedule?.length > 0 ? (
+                  <RouteScheduleTimeline scheduleResults={scheduleResults} routes={routeData || []} />
+                ) : (
+                  <div className="text-center text-muted-foreground py-8">Görselleştirilecek çizelge verisi bulunamadı.</div>
+                )}
               </div>
             </div>
           </div>
