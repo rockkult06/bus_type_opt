@@ -25,9 +25,34 @@ import {
 import { useBusOptimization, type RouteData, type HourlyDemand } from "@/context/bus-optimization-context"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Progress } from "@/components/ui/progress"
+import { parse, ParseResult } from "papaparse"
+import {
+  BusParameters,
+  StrategicResult,
+  ScheduleResult,
+  CombinedOptimizationResult,
+  KPIData,
+} from "@/types"
+import { runStrategicOptimization } from "@/lib/optimization"
+import { runScheduleOptimization } from "@/lib/schedule-optimization"
+import { toast } from "sonner"
+
+// CSV'den gelen bir satırın yapısını tanımlayan arayüz.
+// Anahtarlar string, değerler de string veya undefined olabilir.
+interface CsvRow {
+  [key: string]: string | undefined;
+}
 
 export default function ParametersTab() {
-  const { routeData, setRouteData, parameters, setParameters, setActiveTab } = useBusOptimization()
+  const {
+    routeData,
+    setRouteData,
+    parameters,
+    setParameters,
+    setCombinedResults,
+    setIsOptimizing,
+    setActiveTab,
+  } = useBusOptimization()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [csvError, setCsvError] = useState<string | null>(null)
@@ -35,170 +60,98 @@ export default function ParametersTab() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [startButtonHover, setStartButtonHover] = useState(false)
 
-  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      toast.error("Dosya seçilmedi.")
+      return
+    }
     setCsvError(null)
     setIsUploading(true)
-    setUploadProgress(0)
-    const reader = new FileReader()
 
-    reader.onload = (event) => {
-      try {
-        const csvData = event.target?.result as string
-        const cleanData = csvData.replace(/^\uFEFF/, "") // Remove BOM
-        const lines = cleanData.split(/\r?\n/).filter((line) => line.trim())
+    parse<CsvRow>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (result: ParseResult<CsvRow>) => {
+        try {
+          const parsedRoutes: RouteData[] = result.data.map((row: CsvRow) => {
+            const hourlyDemand: HourlyDemand[] = []
+            // Sütun başlıklarını dinamik olarak analiz et ve saatlik talepleri oluştur
+            for (let hour = 4; hour < 28; hour++) {
+              const realHour = hour % 24
+              const nextHour = (hour + 1) % 24
+              const hourString = `${String(realHour).padStart(2, "0")}:00–${String(nextHour).padStart(2, "0")}:00`
 
-        if (lines.length <= 1) throw new Error("CSV dosyası boş veya geçersiz.")
+              const atobKey = `${hourString} A→B Yolcu Sayısı`
+              const btoaKey = `${hourString} B→A Yolcu Sayısı`
 
-        const headerLine = lines[0]
-        const separator = headerLine.includes("\t") ? "\t" : headerLine.includes(";") ? ";" : ","
-        const headers = headerLine.split(separator).map((h) => h.trim())
-
-        // --- NEW MORE ROBUST HEADER FINDING ---
-        const normalize = (str: string) => str.toLowerCase().replace(/\s+/g, "").replace("->", "→").replace(/\?/g, "→")
-
-        const findHeaderIndex = (possibleNames: string[]): number => {
-          for (const name of possibleNames) {
-            const normalizedName = normalize(name)
-            const index = headers.findIndex((h) => normalize(h).includes(normalizedName))
-            if (index !== -1) return index
-          }
-          return -1
-        }
-
-        const routeNoIndex = findHeaderIndex(["Hat No"])
-        const routeNameIndex = findHeaderIndex(["Hat Adı", "Hat Adi"])
-        const lengthAtoBIndex = findHeaderIndex(["A→B Hat Uzunluğu", "A→B Uzunluk"])
-        const lengthBtoAIndex = findHeaderIndex(["B→A Hat Uzunluğu", "B→A Uzunluk"])
-        const timeAtoBIndex = findHeaderIndex(["A→B Parkur Süresi", "A→B Süre"])
-        const timeBtoAIndex = findHeaderIndex(["B→A Parkur Süresi", "B→A Süre"])
-
-        if ([routeNoIndex, routeNameIndex, lengthAtoBIndex, lengthBtoAIndex, timeAtoBIndex, timeBtoAIndex].includes(-1)) {
-          console.error({
-            routeNoIndex,
-            routeNameIndex,
-            lengthAtoBIndex,
-            lengthBtoAIndex,
-            timeAtoBIndex,
-            timeBtoAIndex,
-          })
-          throw new Error("CSV başlıkları eksik veya hatalı. Gerekli temel sütunlar (Hat No, Adı, Uzunluk, Süre) bulunamadı.")
-        }
-
-        // --- NEW HOURLY DEMAND PARSING ---
-        const demandColumnRegex = /(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})\s*(A(→|->|\?)B|B(→|->|\?)A)/i
-
-        const demandColumns = (
-          headers
-            .map((header, index) => {
-              const match = header.match(demandColumnRegex)
-              if (match) {
-                const startHour = parseInt(match[1].split(":")[0], 10)
-                const direction = match[3].toLowerCase().includes("a") ? "AtoB" : "BtoA"
-                return { index, startHour, direction }
-              }
-              return null
-            })
-            .filter(Boolean) as { index: number; startHour: number; direction: "AtoB" | "BtoA" }[]
-        )
-
-        if (demandColumns.length === 0) {
-          throw new Error("CSV dosyasında saatlik yolcu verisi bulunamadı. Başlık formatını kontrol edin (örn: '04:00-05:00 A→B Yolcu').")
-        }
-
-        const parsedRoutes: RouteData[] = (
-          lines
-            .slice(1)
-            .map((line) => {
-              if (!line.trim()) return null // Skip empty lines
-
-              const values = line.split(separator).map((item) => item.trim())
-              const hourlyDemandMap = new Map<number, { passengersAtoB?: number; passengersBtoA?: number }>()
-
-              for (const col of demandColumns) {
-                const hourData = hourlyDemandMap.get(col.startHour) || {}
-                const passengerCount = Number.parseInt(values[col.index] || "0")
-
-                if (col.direction === "AtoB") {
-                  hourData.passengersAtoB = isNaN(passengerCount) ? 0 : passengerCount
-                } else {
-                  hourData.passengersBtoA = isNaN(passengerCount) ? 0 : passengerCount
-                }
-                hourlyDemandMap.set(col.startHour, hourData)
-              }
-
-              const hourlyDemand: HourlyDemand[] = []
-              for (const [hour, data] of hourlyDemandMap.entries()) {
+              if (row[atobKey] && row[btoaKey]) {
                 hourlyDemand.push({
-                  hour: hour,
-                  passengersAtoB: data.passengersAtoB ?? 0,
-                  passengersBtoA: data.passengersBtoA ?? 0,
+                  hour: realHour,
+                  passengersAtoB: parseInt(row[atobKey]!, 10) || 0,
+                  passengersBtoA: parseInt(row[btoaKey]!, 10) || 0,
                 })
               }
-              hourlyDemand.sort((a, b) => a.hour - b.hour) // ensure sorted by hour
+            }
+            
+            const routeNo = row["Hat No"]
+            const routeName = row["Hat Adı"]
+            const lengthAtoB = row["A→B Hat Uzunluğu (km)"]
+            const lengthBtoA = row["B→A Hat Uzunluğu (km)"]
+            const timeAtoB = row["A→B Parkur Süresi (dk)"]
+            const timeBtoA = row["B→A Parkur Süresi (dk)"]
 
-              const route: RouteData = {
-                routeNo: values[routeNoIndex],
-                routeName: values[routeNameIndex],
-                routeLengthAtoB: Number.parseFloat(values[lengthAtoBIndex]?.replace(",", ".") || "0"),
-                routeLengthBtoA: Number.parseFloat(values[lengthBtoAIndex]?.replace(",", ".") || "0"),
-                travelTimeAtoB: Number.parseInt(values[timeAtoBIndex] || "0"),
-                travelTimeBtoA: Number.parseInt(values[timeBtoAIndex] || "0"),
-                hourlyDemand: hourlyDemand,
-              }
+            if (!routeNo || hourlyDemand.length !== 24 || !routeName || !lengthAtoB || !lengthBtoA || !timeAtoB || !timeBtoA) {
+              // Hatanın daha anlaşılır olması için hangi satırda olduğunu belirtelim.
+              throw new Error(`CSV satırında eksik veya yanlış formatta veri. Satır: ${JSON.stringify(row)}`)
+            }
 
-              if (!route.routeNo || !route.routeName) {
-                return null
-              }
-
-              return route
-            })
-            .filter(Boolean) as RouteData[]
-        )
-
-        if (parsedRoutes.length === 0) {
-          throw new Error("CSV dosyasından geçerli hat verisi okunamadı.")
-        }
-        
-        // Simulate a delay for the progress bar
-        setTimeout(() => {
+            return {
+              routeNo: routeNo,
+              routeName: routeName,
+              routeLengthAtoB: parseFloat(lengthAtoB.replace(',', '.')),
+              routeLengthBtoA: parseFloat(lengthBtoA.replace(',', '.')),
+              travelTimeAtoB: parseInt(timeAtoB, 10),
+              travelTimeBtoA: parseInt(timeBtoA, 10),
+              hourlyDemand,
+            }
+          })
           setRouteData(parsedRoutes)
-          setUploadProgress(100)
-          setTimeout(() => {
-            setIsUploading(false)
-            setUploadProgress(0)
-          }, 500)
-        }, 1000)
-      } catch (error) {
-        setCsvError("CSV dosyası işlenirken bir hata oluştu. Lütfen formatı kontrol edin.")
-        console.error(error)
+          toast.success(`${parsedRoutes.length} hat başarıyla yüklendi.`)
+        } catch (error: any) {
+          console.error("CSV işleme hatası:", error)
+          toast.error(`CSV dosyasını işlerken hata oluştu: ${error.message}`)
+          setRouteData([])
+        } finally {
+          setIsUploading(false)
+        }
+      },
+      error: (error: Error) => {
+        console.error("PapaParse hatası:", error)
+        toast.error(`Dosya okunamadı: ${error.message}`)
         setIsUploading(false)
-        setUploadProgress(0)
-      }
-    }
-
-    // Use readAsText with UTF-8 encoding explicitly
-    reader.readAsText(file, "UTF-8")
+      },
+    })
   }
 
   const handleParameterChange = (
-    busType: "minibus" | "solo" | "articulated",
-    field: "capacity" | "fuelCost" | "fleetCount" | "maintenanceCost" | "depreciationCost" | "carbonEmission",
-    value: number,
+    busType: "minibus" | "solo" | "articulated" | "driver" | "operation",
+    field: string,
+    value: number | string,
   ) => {
-    // Prevent NaN values
-    if (isNaN(value)) {
-      value = 0
-    }
+    const numValue = typeof value === 'string' ? parseFloat(value) : value
+    if (isNaN(numValue)) return
 
-    setParameters({
-      ...parameters,
-      [busType]: {
-        ...parameters[busType],
-        [field]: value,
-      },
+    setParameters((prevParams: BusParameters) => {
+      const newParams = { ...prevParams }
+      if (busType === 'driver' || busType === 'operation') {
+        // @ts-ignore
+        newParams[busType][field] = numValue
+      } else {
+        // @ts-ignore
+        newParams[busType][field] = numValue
+      }
+      return newParams
     })
   }
 
@@ -216,14 +169,32 @@ export default function ParametersTab() {
     })
   }
 
-  const handleContinue = () => {
+  const handleStartOptimization = async () => {
     if (routeData.length === 0) {
-      setCsvError("Lütfen önce CSV dosyası yükleyin.")
+      toast.error("Optimizasyonu başlatmak için lütfen önce bir talep dosyası yükleyin.")
       return
     }
+    
+    setIsOptimizing(true)
+    setActiveTab("results") // Kullanıcıyı hemen sonuçlar sekmesine yönlendir
 
-    // Move to the next step
-    setActiveTab("busOptimization")
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    try {
+      const strategicResult = runStrategicOptimization(routeData, parameters)
+      const scheduleResult = runScheduleOptimization(strategicResult, routeData, parameters)
+      const kpi = calculateKpis(strategicResult, scheduleResult, routeData, parameters)
+      const combinedResults: CombinedOptimizationResult = { strategicResult, scheduleResult, kpi }
+      
+      setCombinedResults(combinedResults)
+      toast.success("Optimizasyon başarıyla tamamlandı!")
+    } catch (error: any) {
+      console.error("Optimizasyon sırasında bir hata oluştu:", error)
+      toast.error(`Optimizasyon başarısız oldu: ${error.message}`)
+      setActiveTab("parameters")
+    } finally {
+      setIsOptimizing(false)
+    }
   }
 
   return (
@@ -752,7 +723,7 @@ export default function ParametersTab() {
                   </Tooltip>
 
                   <Button
-                    onClick={handleContinue}
+                    onClick={handleStartOptimization}
                     disabled={routeData.length === 0}
                     className={`px-5 h-10 text-sm transition-all duration-300 shadow-md rounded-md ${
                       startButtonHover
@@ -763,7 +734,7 @@ export default function ParametersTab() {
                     onMouseLeave={() => setStartButtonHover(false)}
                   >
                     <ArrowRight className="mr-2 h-4 w-4" />
-                    Devam Et
+                    Optimizasyonu Başlat
                   </Button>
 
                   <div className="w-full mt-1">
@@ -825,7 +796,7 @@ export default function ParametersTab() {
 
         <div className="flex justify-center mt-5">
           <Button
-            onClick={handleContinue}
+            onClick={handleStartOptimization}
             disabled={routeData.length === 0}
             className={`px-6 py-2 text-base transition-all duration-300 shadow-md hover:shadow-lg rounded-md ${
               startButtonHover
@@ -836,10 +807,65 @@ export default function ParametersTab() {
             onMouseLeave={() => setStartButtonHover(false)}
           >
             <ArrowRight className="mr-2 h-5 w-5" />
-            Devam Et
+            Optimizasyonu Başlat
           </Button>
         </div>
       </div>
     </TooltipProvider>
   )
+}
+
+function calculateKpis(
+    strategicResult: StrategicResult,
+    scheduleResult: ScheduleResult,
+    routes: RouteData[],
+    parameters: BusParameters
+): KPIData {
+    let totalPassengers = 0;
+    routes.forEach(route => {
+        route.hourlyDemand.forEach(demand => {
+            totalPassengers += demand.passengersAtoB + demand.passengersBtoA;
+        });
+    });
+
+    let totalDistance = 0;
+    let totalFuelCost = 0;
+    let totalMaintenanceCost = 0;
+    let totalDepreciationCost = 0;
+    let totalOperatingMinutes = 0;
+    let totalCarbonEmission = 0;
+
+    const routeMap = new Map(routes.map(r => [r.routeNo, r]));
+
+    scheduleResult.schedule.forEach(trip => {
+        const route = routeMap.get(trip.routeNo);
+        if (!route) return;
+
+        const distance = trip.direction === "AtoB" ? route.routeLengthAtoB : route.routeLengthBtoA;
+        totalDistance += distance;
+        
+        const busParams = parameters[trip.busType];
+        totalFuelCost += distance * busParams.fuelCost;
+        totalMaintenanceCost += distance * busParams.maintenanceCost;
+        totalDepreciationCost += distance * busParams.depreciationCost;
+        totalCarbonEmission += distance * busParams.carbonEmission;
+        totalOperatingMinutes += trip.endTime - trip.startTime;
+    });
+
+    const totalDriverCost = (totalOperatingMinutes / 60) * parameters.driver.costPerHour;
+    const totalOperatingCost = totalFuelCost + totalMaintenanceCost + totalDepreciationCost + totalDriverCost;
+    
+    return {
+        totalPassengers,
+        totalDistance,
+        totalOperatingCost,
+        totalFuelCost,
+        totalMaintenanceCost,
+        totalDepreciationCost,
+        totalDriverCost,
+        costPerKm: totalDistance > 0 ? totalOperatingCost / totalDistance : 0,
+        costPerPassenger: totalPassengers > 0 ? totalOperatingCost / totalPassengers : 0,
+        totalCarbonEmission,
+        carbonPerPassenger: totalPassengers > 0 ? totalCarbonEmission / totalPassengers : 0
+    }
 }
